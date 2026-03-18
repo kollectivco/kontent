@@ -62,6 +62,7 @@ function ktn_activate_plugin()
 {
     ktn_register_post_types();
     ktn_register_taxonomies();
+    ktn_create_database_tables();
     flush_rewrite_rules();
 }
 

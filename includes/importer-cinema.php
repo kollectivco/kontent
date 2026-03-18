@@ -99,62 +99,90 @@ class Ktn_Cinema_Importer
             return false;
         }
 
-        global $wpdb;
-        $table_name = $wpdb->prefix . 'ktn_showtimes';
+        $existing_rows = $wpdb->get_results(
+            $wpdb->prepare(
+                "SELECT id, movie_title_scraped, show_date, show_time, matched_movie_id FROM $table_name WHERE cinema_id = %d",
+                $post_id
+            )
+        );
 
-        // Cleanup old showtimes for this cinema before syncing fresh data
-        $wpdb->query($wpdb->prepare("DELETE FROM $table_name WHERE cinema_id = %d", $post_id));
+        $existing_map = array();
+        foreach ($existing_rows as $existing_row) {
+            $row_key = implode('|', array(
+                $existing_row->movie_title_scraped,
+                $existing_row->show_date,
+                $existing_row->show_time,
+            ));
+            $existing_map[$row_key] = $existing_row;
+        }
 
         $added = 0;
+        $seen_ids = array();
         foreach ($results as $row) {
             $matched_id = self::matchMovieTitle($row['movie_title_scraped']);
-
-            $exists = $wpdb->get_var($wpdb->prepare(
-                "SELECT id FROM $table_name WHERE cinema_id = %d AND movie_title_scraped = %s AND show_date = %s AND show_time = %s",
-                $row['cinema_id'],
+            $row_key = implode('|', array(
                 $row['movie_title_scraped'],
                 $row['show_date'],
-                $row['show_time']
+                $row['show_time'],
             ));
+            $existing = isset($existing_map[$row_key]) ? $existing_map[$row_key] : null;
+            $resolved_match = $matched_id ? $matched_id : ($existing ? $existing->matched_movie_id : null);
 
-            if ($exists) {
+            if ($existing) {
                 $wpdb->update(
                     $table_name,
                     array(
-                    // Only update matched ID if it was unmatched or we found a new match
-                    'matched_movie_id' => $matched_id ? $matched_id : null,
-                    'experience' => $row['experience'],
-                    'price_text' => $row['price_text'],
-                    'updated_at' => current_time('mysql')
-                ),
-                    array('id' => $exists)
+                        'cinema_name' => get_the_title($row['cinema_id']) ?: $row['cinema_name'],
+                        'source_url' => $row['source_url'],
+                        'matched_movie_id' => $resolved_match,
+                        'experience' => $row['experience'],
+                        'price_text' => $row['price_text'],
+                        'source_type' => $source_type,
+                        'updated_at' => current_time('mysql')
+                    ),
+                    array('id' => $existing->id)
                 );
+                $seen_ids[] = (int) $existing->id;
             }
             else {
                 $insert_res = $wpdb->insert(
                     $table_name,
                     array(
-                    'cinema_id' => $row['cinema_id'],
-                    'cinema_name' => get_the_title($row['cinema_id']) ?: $row['cinema_name'],
-                    'source_url' => $row['source_url'],
-                    'movie_title_scraped' => $row['movie_title_scraped'],
-                    'matched_movie_id' => $matched_id ? $matched_id : null,
-                    'show_date' => $row['show_date'],
-                    'show_time' => $row['show_time'],
-                    'experience' => $row['experience'],
-                    'price_text' => $row['price_text'],
-                    'source_type' => $source_type,
-                    'scraped_at' => current_time('mysql'),
-                    'updated_at' => current_time('mysql')
-                )
+                        'cinema_id' => $row['cinema_id'],
+                        'cinema_name' => get_the_title($row['cinema_id']) ?: $row['cinema_name'],
+                        'source_url' => $row['source_url'],
+                        'movie_title_scraped' => $row['movie_title_scraped'],
+                        'matched_movie_id' => $resolved_match,
+                        'show_date' => $row['show_date'],
+                        'show_time' => $row['show_time'],
+                        'experience' => $row['experience'],
+                        'price_text' => $row['price_text'],
+                        'source_type' => $source_type,
+                        'scraped_at' => current_time('mysql'),
+                        'updated_at' => current_time('mysql')
+                    )
                 );
 
                 if ($insert_res === false && !empty($wpdb->last_error)) {
                     update_post_meta($post_id, '_ktn_last_error', 'DB Insert Error: ' . $wpdb->last_error);
                     return false;
                 }
+                $seen_ids[] = (int) $wpdb->insert_id;
                 $added++;
             }
+        }
+
+        $stale_ids = array();
+        foreach ($existing_rows as $existing_row) {
+            if (!in_array((int) $existing_row->id, $seen_ids, true)) {
+                $stale_ids[] = (int) $existing_row->id;
+            }
+        }
+
+        if (!empty($stale_ids)) {
+            $wpdb->query(
+                "DELETE FROM $table_name WHERE id IN (" . implode(',', array_map('intval', $stale_ids)) . ')'
+            );
         }
 
         $prev_error = get_post_meta($post_id, '_ktn_last_error', true);

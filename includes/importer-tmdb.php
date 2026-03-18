@@ -143,8 +143,17 @@ function ktn_get_tmdb_media_details($tmdb_id, $type, $token, $language)
         return new WP_Error('tmdb_api_error', __('Failed to query TMDB for details.', 'kontentainment'));
     }
 
+    $code = wp_remote_retrieve_response_code($response);
+    if (200 !== $code) {
+        return new WP_Error('tmdb_api_error', __('Error querying TMDB details. HTTP Status: ', 'kontentainment') . $code);
+    }
+
     $body = wp_remote_retrieve_body($response);
-    $data = JSON_decode($body, true);
+    $data = json_decode($body, true);
+
+    if (!is_array($data) || empty($data['id'])) {
+        return new WP_Error('tmdb_api_error', __('TMDB returned an invalid details response.', 'kontentainment'));
+    }
 
     set_transient($cache_key, $data, 6 * HOUR_IN_SECONDS);
 
