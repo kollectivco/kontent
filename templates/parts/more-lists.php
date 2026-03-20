@@ -22,9 +22,13 @@ if ( ! defined( 'ABSPATH' ) ) {
 		</div>
 		<p class="amc-more-lists__intro">Each list keeps the same editorial system while staying flexible enough for future categories, regional splits, and special franchise charts.</p>
 		<div class="amc-card-grid">
-			<?php foreach ( $lists as $chart ) : ?>
-				<?php include AMC_PLUGIN_DIR . 'templates/parts/chart-card.php'; ?>
-			<?php endforeach; ?>
+			<?php if ( $lists ) : ?>
+				<?php foreach ( $lists as $chart ) : ?>
+					<?php include AMC_PLUGIN_DIR . 'templates/parts/chart-card.php'; ?>
+				<?php endforeach; ?>
+			<?php else : ?>
+				<p>No additional charts are active yet.</p>
+			<?php endif; ?>
 		</div>
 	</div>
 </section>

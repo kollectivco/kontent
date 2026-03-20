@@ -1,6 +1,6 @@
 <?php
 /**
- * Seeded admin-only data for Phase 2 interface.
+ * Admin data helpers.
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -144,7 +144,7 @@ class AMC_Admin_Data {
 
 		return array(
 			array( 'title' => 'Duplicate track candidates', 'body' => $dupes ? $dupes . ' duplicate slugs need manual review.' : 'No duplicate track slugs are currently detected.', 'tone' => 'warning' ),
-			array( 'title' => 'Missing artwork', 'body' => $missing ? $missing . ' artist, album, or track records still use fallback artwork styling.' : 'All current records have artwork placeholders or assigned imagery.', 'tone' => 'danger' ),
+			array( 'title' => 'Missing artwork', 'body' => $missing ? $missing . ' artist, album, or track records still need artwork.' : 'No missing artwork issues are currently detected.', 'tone' => 'danger' ),
 			array( 'title' => 'Draft chart weeks', 'body' => $draft_weeks ? $draft_weeks . ' chart weeks are still waiting for publication flow.' : 'No pending draft weeks right now.', 'tone' => 'info' ),
 		);
 	}
@@ -335,6 +335,10 @@ class AMC_Admin_Data {
 					'generated_week_id' => (int) $row['generated_week_id'],
 					'row_count'   => (int) $row['row_count'],
 					'preview'     => $row['error_message'] ? $row['error_message'] : $row['preview_text'],
+					'diagnostic_summary' => ! empty( $row['diagnostic_summary'] ) ? json_decode( $row['diagnostic_summary'], true ) : array(),
+					'is_duplicate'=> ! empty( $row['is_duplicate'] ),
+					'duplicate_of_upload_id' => (int) $row['duplicate_of_upload_id'],
+					'is_dry_run'  => ! empty( $row['is_dry_run'] ),
 					'uploader'    => $user ? $user->display_name : 'System',
 					'file_name'   => $row['file_name'],
 					'file_url'    => $row['file_url'],
@@ -521,14 +525,25 @@ class AMC_Admin_Data {
 	 *
 	 * @return array
 	 */
-	public static function logs() {
-		$rows = AMC_DB::get_rows( 'ingestion_logs', array( 'order_by' => 'id DESC', 'limit' => 20 ) );
+	public static function logs( $filters = array() ) {
+		$rows = AMC_DB::get_ingestion_logs( $filters );
 
 		return array_map(
 			function ( $row ) {
+				$chart = ! empty( $row['target_chart_id'] ) ? AMC_DB::get_row( 'charts', (int) $row['target_chart_id'] ) : null;
 				return array(
+					'id'     => (int) $row['id'],
+					'upload_id' => (int) $row['upload_id'],
+					'source_row_id' => (int) $row['source_row_id'],
 					'time'   => $row['created_at'],
 					'event'  => $row['action'] . ': ' . $row['message'],
+					'action' => $row['action'],
+					'level'  => $row['level'],
+					'source' => ! empty( $row['source_platform'] ) ? AMC_Ingestion::platform_label( $row['source_platform'] ) : 'System',
+					'country' => ! empty( $row['country'] ) ? $row['country'] : 'Global',
+					'chart'  => $chart ? $chart['name'] : 'N/A',
+					'upload_status' => ! empty( $row['file_status'] ) ? ucfirst( $row['file_status'] ) : 'N/A',
+					'context' => ! empty( $row['context'] ) ? json_decode( $row['context'], true ) : array(),
 					'actor'  => 'System',
 					'status' => ucfirst( $row['level'] ),
 				);
@@ -538,13 +553,54 @@ class AMC_Admin_Data {
 	}
 
 	/**
+	 * Build logs filters from request.
+	 *
+	 * @return array
+	 */
+	public static function logs_filters_from_request() {
+		return array(
+			'upload_id'       => isset( $_GET['log_upload_id'] ) ? absint( wp_unslash( $_GET['log_upload_id'] ) ) : 0,
+			'source_platform' => isset( $_GET['log_source_platform'] ) ? sanitize_key( wp_unslash( $_GET['log_source_platform'] ) ) : '',
+			'country'         => isset( $_GET['log_country'] ) ? sanitize_text_field( wp_unslash( $_GET['log_country'] ) ) : '',
+			'target_chart_id' => isset( $_GET['log_target_chart_id'] ) ? absint( wp_unslash( $_GET['log_target_chart_id'] ) ) : 0,
+			'upload_status'   => isset( $_GET['log_upload_status'] ) ? sanitize_key( wp_unslash( $_GET['log_upload_status'] ) ) : '',
+			'level'           => isset( $_GET['log_level'] ) ? sanitize_key( wp_unslash( $_GET['log_level'] ) ) : '',
+			'date_from'       => isset( $_GET['log_date_from'] ) ? sanitize_text_field( wp_unslash( $_GET['log_date_from'] ) ) : '',
+			'date_to'         => isset( $_GET['log_date_to'] ) ? sanitize_text_field( wp_unslash( $_GET['log_date_to'] ) ) : '',
+			'limit'           => 100,
+		);
+	}
+
+	/**
+	 * Summarize invalid rows by reason for an upload.
+	 *
+	 * @param int $upload_id Upload id.
+	 * @return array
+	 */
+	public static function invalid_row_groups( $upload_id ) {
+		$groups = array();
+
+		foreach ( AMC_Ingestion::invalid_rows( $upload_id, 200 ) as $row ) {
+			$reason = ! empty( $row['validation_message'] ) ? $row['validation_message'] : 'Unknown validation failure';
+
+			if ( empty( $groups[ $reason ] ) ) {
+				$groups[ $reason ] = 0;
+			}
+
+			++$groups[ $reason ];
+		}
+
+		return $groups;
+	}
+
+	/**
 	 * Tools data.
 	 *
 	 * @return array
 	 */
 	public static function tools() {
 		return array(
-			array( 'tool' => 'Rebuild seeded admin previews', 'description' => 'Refresh UI demo datasets for dashboard screens.', 'action' => 'Run preview rebuild' ),
+			array( 'tool' => 'Run diagnostics export', 'description' => 'Export current operational state for logs, review queues, and invalid rows.', 'action' => 'Export diagnostics' ),
 			array( 'tool' => 'Flush dashboard routes', 'description' => 'Re-register public and dashboard routes after structural changes.', 'action' => 'Flush routes' ),
 			array( 'tool' => 'Export UI snapshot', 'description' => 'Generate a management-state export for review.', 'action' => 'Export snapshot' ),
 		);

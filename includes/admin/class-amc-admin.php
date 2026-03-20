@@ -387,6 +387,10 @@ class AMC_Admin {
 				$tools
 			)
 		);
+		echo '<div class="amc-admin-definition-list">';
+		printf( '<div><strong>Cron-ready service methods</strong><span>Reprocessing, regeneration, publication checks, republishing, and rollback now exist as reusable backend service methods for future automation layers.</span></div>' );
+		printf( '<div><strong>Manual-first workflow</strong><span>The admin-triggered flow remains the primary path in this phase, with automation support intentionally kept foundational.</span></div>' );
+		echo '</div>';
 		self::render_panel_end();
 	}
 
@@ -396,18 +400,46 @@ class AMC_Admin {
 	 * @return void
 	 */
 	private static function render_wp_admin_logs() {
-		$logs = AMC_Admin_Data::logs();
+		$filters = AMC_Admin_Data::logs_filters_from_request();
+		$logs    = AMC_Admin_Data::logs( $filters );
 
-		self::render_panel_start( 'System logs', 'Recent seeded events and operational notes for the plugin control layer.' );
+		self::render_panel_start( 'System logs', 'Operational diagnostics with filters for upload, source, country, chart, status, and date range.' );
+		echo '<form method="get" class="amc-admin-form">';
+		echo '<input type="hidden" name="page" value="' . esc_attr( isset( $_GET['page'] ) ? sanitize_key( wp_unslash( $_GET['page'] ) ) : 'kontentainment-charts-logs' ) . '">';
+		self::field_input( 'Upload ID', 'log_upload_id', ! empty( $filters['upload_id'] ) ? (string) $filters['upload_id'] : '', 'number' );
+		self::field_select( 'Source', 'log_source_platform', $filters['source_platform'], array( '' => 'All sources' ) + self::source_platform_options() );
+		self::field_input( 'Country', 'log_country', $filters['country'] );
+		self::field_select( 'Chart', 'log_target_chart_id', $filters['target_chart_id'], array( 0 => 'All charts' ) + self::chart_options() );
+		self::field_select( 'Upload status', 'log_upload_status', $filters['upload_status'], array( '' => 'All statuses', 'uploaded' => 'Uploaded', 'parsed' => 'Parsed', 'matched' => 'Matched', 'generated' => 'Generated', 'published' => 'Published', 'failed' => 'Failed' ) );
+		self::field_select( 'Level', 'log_level', $filters['level'], array( '' => 'All levels', 'error' => 'Error', 'warning' => 'Warning', 'info' => 'Info' ) );
+		self::field_input( 'From date', 'log_date_from', $filters['date_from'], 'date' );
+		self::field_input( 'To date', 'log_date_to', $filters['date_to'], 'date' );
+		self::submit_row( array( array( 'label' => 'Filter logs', 'class' => 'button-primary' ) ) );
+		echo '</form>';
+		echo '<div class="amc-admin-button-row"><a class="button button-secondary" href="' . esc_url( self::action_url( 'export', 0, 'logs' ) ) . '">Export logs CSV</a></div>';
 		self::render_table(
-			array( 'Time', 'Event', 'Actor', 'Status' ),
+			array( 'Time', 'Event', 'Source', 'Country', 'Chart', 'Upload', 'Upload status', 'Status' ),
 			array_map(
 				function ( $row ) {
-					return array( $row['time'], $row['event'], $row['actor'], $row['status'] );
+					$upload_link = $row['upload_id'] ? '<a href="' . esc_url( add_query_arg( 'upload_id', $row['upload_id'], AMC_Admin_Data::custom_dashboard_url( 'uploads' ) ) ) . '">#' . (int) $row['upload_id'] . '</a>' : 'N/A';
+					return array( $row['time'], $row['event'], $row['source'], $row['country'], $row['chart'], array( 'value' => $upload_link, 'html' => true ), $row['upload_status'], $row['status'] );
 				},
 				$logs
 			)
 		);
+		$priority_logs = array_filter(
+			$logs,
+			function ( $row ) {
+				return in_array( $row['status'], array( 'Error', 'Warning' ), true );
+			}
+		);
+		if ( ! empty( $priority_logs ) ) {
+			echo '<div class="amc-admin-definition-list">';
+			foreach ( array_slice( $priority_logs, 0, 8 ) as $row ) {
+				printf( '<div><strong>%1$s</strong><span>%2$s</span></div>', esc_html( strtoupper( $row['status'] ) . ' / ' . $row['time'] ), esc_html( $row['event'] ) );
+			}
+			echo '</div>';
+		}
 		self::render_panel_end();
 	}
 
@@ -616,7 +648,7 @@ class AMC_Admin {
 		);
 		self::render_panel_end();
 
-		self::render_panel_start( 'Published vs draft chart weeks', 'A seeded weekly publishing overview for the main dashboard UI.' );
+		self::render_panel_start( 'Published vs draft chart weeks', 'A live weekly publishing overview for the main dashboard UI.' );
 		echo '<div class="amc-admin-stat-stack">';
 		foreach ( $weeks as $week ) {
 			printf( '<div><strong>%1$s</strong><span>%2$s</span></div>', esc_html( (string) $week['value'] ), esc_html( $week['label'] ) );
@@ -770,6 +802,8 @@ class AMC_Admin {
 		if ( ! empty( $week['id'] ) ) {
 			echo '<div class="amc-admin-button-row">';
 			echo '<a class="button button-secondary" href="' . esc_url( self::action_url( 'week', (int) $week['id'], 'generate' ) ) . '">Generate draft from approved uploads</a>';
+			echo '<a class="button button-secondary" href="' . esc_url( self::confirm_action_url( 'week', (int) $week['id'], 'republish', 'Republish this chart week?' ) ) . '">Republish week</a>';
+			echo '<a class="button button-secondary" href="' . esc_url( self::confirm_action_url( 'week', (int) $week['id'], 'rollback', 'Rollback to the previous published week?' ) ) . '">Rollback to previous live week</a>';
 			echo '</div>';
 		}
 
@@ -782,8 +816,10 @@ class AMC_Admin {
 						$actions = array(
 							'<a href="' . esc_url( add_query_arg( 'week_id', $row['id'], self::current_url() ) ) . '">Edit</a>',
 							'<a href="' . esc_url( self::action_url( 'week', $row['id'], 'generate' ) ) . '">Generate</a>',
-							'<a href="' . esc_url( self::action_url( 'week', $row['id'], 'published' === $row['status'] ? 'unpublish' : 'publish' ) ) . '">' . esc_html( 'published' === $row['status'] ? 'Unpublish' : 'Publish' ) . '</a>',
+							'<a href="' . esc_url( self::confirm_action_url( 'week', $row['id'], 'published' === $row['status'] ? 'unpublish' : 'publish', 'Are you sure you want to change the live state of this chart week?' ) ) . '">' . esc_html( 'published' === $row['status'] ? 'Unpublish' : 'Publish' ) . '</a>',
+							'<a href="' . esc_url( self::confirm_action_url( 'week', $row['id'], 'republish', 'Republish this chart week?' ) ) . '">Republish</a>',
 							'<a href="' . esc_url( self::action_url( 'week', $row['id'], 'archived' === $row['status'] ? 'restore' : 'archive' ) ) . '">' . esc_html( 'archived' === $row['status'] ? 'Restore' : 'Archive' ) . '</a>',
+							'<a href="' . esc_url( self::confirm_action_url( 'week', $row['id'], 'rollback', 'Rollback to the previous published week?' ) ) . '">Rollback</a>',
 							'<a href="' . esc_url( self::action_url( 'week', $row['id'], ! empty( $row['is_featured'] ) ? 'unfeature' : 'feature' ) ) . '">' . esc_html( ! empty( $row['is_featured'] ) ? 'Unfeature' : 'Feature' ) . '</a>',
 						);
 						return array(
@@ -851,6 +887,7 @@ class AMC_Admin {
 					);
 				}
 				echo '</div>';
+				echo '<div class="amc-admin-button-row"><a class="button button-secondary" href="' . esc_url( self::action_url( 'export', (int) $week['id'], 'dropped_out' ) ) . '">Export dropped-out summary</a></div>';
 			}
 		}
 		self::render_panel_end();
@@ -904,7 +941,7 @@ class AMC_Admin {
 		self::submit_row( array( array( 'label' => $id ? 'Update track' : 'Create track', 'class' => 'button-primary' ) ) );
 		self::close_form();
 		self::render_panel_end();
-		self::render_panel_start( 'Track library', 'Current seeded view of editable track records.' );
+		self::render_panel_start( 'Track library', 'Current editable track records.' );
 		self::render_table(
 			array( 'Title', 'Artist', 'Album', 'ISRC', 'Aliases', 'Release date', 'Genre', 'Status', 'Actions' ),
 			array_map(
@@ -970,7 +1007,7 @@ class AMC_Admin {
 		self::submit_row( array( array( 'label' => $id ? 'Update artist' : 'Create artist', 'class' => 'button-primary' ) ) );
 		self::close_form();
 		self::render_panel_end();
-		self::render_panel_start( 'Artist library', 'Seeded artist records and metadata overview.' );
+		self::render_panel_start( 'Artist library', 'Current artist records and metadata overview.' );
 		self::render_table(
 			array( 'Name', 'Country', 'Genre', 'Socials', 'Tracks', 'Albums', 'Status', 'Actions' ),
 			array_map(
@@ -1034,7 +1071,7 @@ class AMC_Admin {
 		self::submit_row( array( array( 'label' => $id ? 'Update album' : 'Create album', 'class' => 'button-primary' ) ) );
 		self::close_form();
 		self::render_panel_end();
-		self::render_panel_start( 'Album library', 'Seeded album records with release context and visibility.' );
+		self::render_panel_start( 'Album library', 'Current album records with release context and visibility.' );
 		self::render_table(
 			array( 'Title', 'Artist', 'Release date', 'Tracks', 'Genre', 'Label', 'Status', 'Actions' ),
 			array_map(
@@ -1057,8 +1094,10 @@ class AMC_Admin {
 		$uploads = AMC_Admin_Data::uploads();
 		$preview_upload_id = isset( $_GET['upload_id'] ) ? absint( wp_unslash( $_GET['upload_id'] ) ) : 0;
 		$preview_rows      = $preview_upload_id ? AMC_Ingestion::preview_rows( $preview_upload_id, 8 ) : array();
+		$invalid_groups    = $preview_upload_id ? AMC_Admin_Data::invalid_row_groups( $preview_upload_id ) : array();
+		$current_upload    = $preview_upload_id ? AMC_DB::get_row( 'source_uploads', $preview_upload_id ) : null;
 		echo '<section class="amc-admin-grid amc-admin-grid--split">';
-		self::render_panel_start( 'Source upload intake', 'Each upload now stores source platform, country, chart week, target chart, chart type, parser state, and file metadata for the real pipeline.' );
+		self::render_panel_start( 'Source upload intake', 'Each upload now stores source platform, country, chart week, target chart, chart type, parser state, duplicate checks, dry-run metadata, and file diagnostics.' );
 		self::open_form( 'upload_source', array(), array( 'enctype' => 'multipart/form-data' ) );
 		echo '<div class="amc-admin-form">';
 		self::field_select( 'Source platform', 'source_platform', 'spotify', self::source_platform_options() );
@@ -1068,32 +1107,60 @@ class AMC_Admin {
 		self::field_select( 'Target chart', 'target_chart_id', 0, self::chart_options() );
 		self::field_select( 'Chart type', 'chart_type', 'track', array( 'track' => 'Track', 'artist' => 'Artist' ) );
 		echo '<label><span>Upload file</span><input type="file" name="source_file" accept=".csv,.tsv,.txt,.xlsx,.xls"></label>';
+		self::field_checkbox( 'Validation-only dry run', 'dry_run', false );
+		self::field_checkbox( 'Allow duplicate override', 'allow_duplicate', false );
 		echo '<label><span>Uploader</span><input type="text" value="' . esc_attr( wp_get_current_user()->display_name ? wp_get_current_user()->display_name : 'Current user' ) . '" readonly></label>';
 		echo '</div>';
 		self::submit_row( array( array( 'label' => 'Upload source sheet', 'class' => 'button-primary' ) ) );
 		self::close_form();
+		echo '<div class="amc-admin-definition-list">';
+		printf( '<div><strong>Spotify Weekly</strong><span>Expected columns: title, artist, rank optional, streams/plays, previous rank optional, peak rank optional, weeks on chart optional, album optional, uri/url optional. The column named "source" is ignored completely.</span></div>' );
+		printf( '<div><strong>YouTube Top Songs</strong><span>Expected columns: title, artist, rank, views or plays, optional growth, previous rank, peak rank, weeks on chart, url or uri.</span></div>' );
+		printf( '<div><strong>YouTube Top Artists</strong><span>Expected columns: artist/channel name, rank, views optional, growth optional, previous rank, peak rank, weeks on chart.</span></div>' );
+		printf( '<div><strong>Shazam Chart</strong><span>Expected columns: title, artist/subtitle, rank, shazams/count, optional previous rank, peak rank, weeks on chart.</span></div>' );
+		printf( '<div><strong>Unsupported or corrupted files</strong><span>Unsupported formats and broken spreadsheets fail clearly with parser diagnostics. Use CSV, TSV, TXT, XLSX, or XLS exports only.</span></div>' );
+		echo '</div>';
 		self::render_panel_end();
 		self::render_panel_start( 'Recent source uploads', 'Operational view of incoming chart source sheets.' );
 		self::render_table(
 			array( 'Source', 'Country', 'Chart', 'Type', 'Upload date', 'Chart week', 'Status', 'Rows', 'Preview', 'Uploader', 'Actions' ),
 			array_map(
 				function ( $row ) {
+					$badges = array();
+					if ( ! empty( $row['is_dry_run'] ) ) {
+						$badges[] = 'Dry run';
+					}
+					if ( ! empty( $row['is_duplicate'] ) ) {
+						$badges[] = 'Duplicate';
+					}
 					$actions = array(
 						'<a href="' . esc_url( add_query_arg( 'upload_id', $row['id'], self::current_url() ) ) . '">Preview</a>',
 						'<a href="' . esc_url( self::action_url( 'upload', $row['id'], 'parse' ) ) . '">Reparse</a>',
 						'<a href="' . esc_url( self::action_url( 'upload', $row['id'], 'match' ) ) . '">Run matching</a>',
 						'<a href="' . esc_url( self::action_url( 'upload', $row['id'], 'generate' ) ) . '">Generate draft</a>',
+						'<a href="' . esc_url( self::action_url( 'upload', $row['id'], 'commit' ) ) . '">Commit dry run</a>',
+						'<a href="' . esc_url( self::action_url( 'export', $row['id'], 'invalid_rows' ) ) . '">Export invalid rows</a>',
 						'<a href="' . esc_url( self::action_url( 'upload', $row['id'], 'delete' ) ) . '">Delete</a>',
 					);
 					if ( ! empty( $row['file_url'] ) ) {
 						$actions[] = '<a href="' . esc_url( $row['file_url'] ) . '" target="_blank" rel="noreferrer">File</a>';
 					}
-					return array( $row['source'], $row['country'], $row['chart'], $row['chart_type'], $row['upload_date'], $row['week'], $row['status'], (string) $row['row_count'], $row['preview'], $row['uploader'], array( 'value' => implode( ' / ', $actions ), 'html' => true ) );
+					return array( $row['source'], $row['country'], $row['chart'], $row['chart_type'], $row['upload_date'], $row['week'], $row['status'] . ( ! empty( $badges ) ? ' / ' . implode( ' / ', $badges ) : '' ), (string) $row['row_count'], $row['preview'], $row['uploader'], array( 'value' => implode( ' / ', $actions ), 'html' => true ) );
 				},
 				$uploads
 			)
 		);
 		if ( $preview_upload_id ) {
+			if ( $current_upload && ! empty( $current_upload['diagnostic_summary'] ) ) {
+				$summary = json_decode( $current_upload['diagnostic_summary'], true );
+				if ( is_array( $summary ) ) {
+					echo '<div class="amc-admin-stat-stack">';
+					foreach ( $summary as $key => $value ) {
+						printf( '<div><strong>%1$s</strong><span>%2$s</span></div>', esc_html( (string) $value ), esc_html( ucwords( str_replace( '_', ' ', $key ) ) ) );
+					}
+					echo '</div>';
+				}
+			}
 			if ( $preview_rows ) {
 				echo '<div class="amc-admin-definition-list">';
 				foreach ( $preview_rows as $preview_row ) {
@@ -1107,6 +1174,17 @@ class AMC_Admin {
 						! empty( $preview_row['validation_message'] ) ? ' | ' . esc_html( $preview_row['validation_message'] ) : ''
 					);
 				}
+				echo '</div>';
+				if ( ! empty( $invalid_groups ) ) {
+					echo '<div class="amc-admin-definition-list">';
+					foreach ( $invalid_groups as $reason => $count ) {
+						printf( '<div><strong>%1$s</strong><span>%2$s rejected rows</span></div>', esc_html( $reason ), esc_html( (string) $count ) );
+					}
+					echo '</div>';
+				}
+				echo '<div class="amc-admin-button-row">';
+				echo '<a class="button button-secondary" href="' . esc_url( self::action_url( 'export', $preview_upload_id, 'invalid_rows' ) ) . '">Download invalid-row debug CSV</a>';
+				echo '<a class="button button-secondary" href="' . esc_url( self::action_url( 'export', $preview_upload_id, 'logs' ) ) . '">Export this upload logs</a>';
 				echo '</div>';
 			} else {
 				echo '<p>No parsed preview rows are available for this upload yet.</p>';
@@ -1136,6 +1214,7 @@ class AMC_Admin {
 				$candidates
 			)
 		);
+		echo '<div class="amc-admin-button-row"><a class="button button-secondary" href="' . esc_url( self::action_url( 'export', 0, 'matching_queue' ) ) . '">Export matching review queue</a></div>';
 		self::render_panel_end();
 		self::render_panel_start( 'Manual override tools', 'Manual override decisions now persist to the matching queue and source row records.' );
 		self::open_form(
@@ -1201,8 +1280,12 @@ class AMC_Admin {
 		self::submit_row( array( array( 'label' => 'Save methodology rules', 'class' => 'button-primary' ) ) );
 		self::close_form();
 		echo '<div class="amc-admin-definition-list">';
-		foreach ( $data['methodology'] as $label => $value ) {
-			printf( '<div><strong>%1$s</strong><span>%2$s</span></div>', esc_html( $label ), esc_html( $value ) );
+		if ( $data['methodology'] ) {
+			foreach ( $data['methodology'] as $label => $value ) {
+				printf( '<div><strong>%1$s</strong><span>%2$s</span></div>', esc_html( $label ), esc_html( $value ) );
+			}
+		} else {
+			echo '<div><strong>No scoring rules saved yet</strong><span>Enter real source weights and methodology rules to begin using the scoring layer.</span></div>';
 		}
 		echo '</div>';
 		self::render_panel_end();
@@ -1226,8 +1309,10 @@ class AMC_Admin {
 		if ( $week ) {
 			echo '<div class="amc-admin-button-row">';
 			echo '<a class="button button-secondary" href="' . esc_url( self::action_url( 'week', (int) $week['id'], 'generate' ) ) . '">Generate draft</a>';
-			echo '<a class="button button-primary" href="' . esc_url( self::action_url( 'week', (int) $week['id'], 'published' === $week['status'] ? 'unpublish' : 'publish' ) ) . '">' . esc_html( 'published' === $week['status'] ? 'Unpublish week' : 'Publish week' ) . '</a>';
+			echo '<a class="button button-primary" href="' . esc_url( self::confirm_action_url( 'week', (int) $week['id'], 'published' === $week['status'] ? 'unpublish' : 'publish', 'Are you sure you want to change the live state of this chart week?' ) ) . '">' . esc_html( 'published' === $week['status'] ? 'Unpublish week' : 'Publish week' ) . '</a>';
+			echo '<a class="button button-secondary" href="' . esc_url( self::confirm_action_url( 'week', (int) $week['id'], 'republish', 'Republish this chart week and refresh the live version?' ) ) . '">Republish week</a>';
 			echo '<a class="button button-secondary" href="' . esc_url( self::action_url( 'week', (int) $week['id'], 'archive' ) ) . '">Archive week</a>';
+			echo '<a class="button button-secondary" href="' . esc_url( self::confirm_action_url( 'week', (int) $week['id'], 'rollback', 'Rollback to the previous published week for this chart and country?' ) ) . '">Rollback to previous live week</a>';
 			echo '<a class="button button-secondary" href="' . esc_url( self::action_url( 'week', (int) $week['id'], ! empty( $week['is_featured'] ) ? 'unfeature' : 'feature' ) ) . '">' . esc_html( ! empty( $week['is_featured'] ) ? 'Unfeature week' : 'Feature on homepage' ) . '</a>';
 			echo '</div>';
 		} else {
@@ -1244,6 +1329,7 @@ class AMC_Admin {
 				);
 			}
 			echo '</div>';
+			echo '<div class="amc-admin-button-row"><a class="button button-secondary" href="' . esc_url( self::action_url( 'export', (int) $week['id'], 'dropped_out' ) ) . '">Export dropped-out summary</a></div>';
 		}
 		self::render_panel_end();
 		echo '</section>';
@@ -1282,16 +1368,13 @@ class AMC_Admin {
 			)
 		);
 		self::render_panel_end();
-		self::render_panel_start( 'Permission profile', 'UI-only placeholder for granular capability mapping and user assignment.' );
-		self::render_form(
-			array(
-				'Role' => 'Data Manager',
-				'Can upload sources' => 'Yes',
-				'Can approve matches' => 'Yes',
-				'Can publish chart weeks' => 'No',
-				'Can edit settings' => 'No',
-			)
-		);
+		self::render_panel_start( 'Permission profile', 'Current operational permission model for the main chart workflow.' );
+		echo '<div class="amc-admin-definition-list">';
+		echo '<div><strong>Upload and cleaning access</strong><span>Controlled by the `amc_manage_weeks` capability.</span></div>';
+		echo '<div><strong>Chart and library editing</strong><span>Controlled by `amc_manage_charts` and `amc_manage_library`.</span></div>';
+		echo '<div><strong>Publishing and archives</strong><span>Controlled by `amc_publish_charts`.</span></div>';
+		echo '<div><strong>Settings and governance</strong><span>Controlled by `amc_manage_settings`.</span></div>';
+		echo '</div>';
 		self::render_panel_end();
 		echo '</section>';
 	}
@@ -1314,12 +1397,12 @@ class AMC_Admin {
 		self::submit_row( array( array( 'label' => 'Save settings', 'class' => 'button-primary' ) ) );
 		self::close_form();
 		self::render_panel_end();
-		self::render_panel_start( 'Settings summary', 'Current seeded defaults displayed for interface planning.' );
+		self::render_panel_start( 'Settings summary', 'Current saved settings displayed for the production configuration.' );
 		echo '<div class="amc-admin-definition-list">';
 		printf( '<div><strong>Platform name</strong><span>%s</span></div>', esc_html( $settings['platform_name'] ) );
-		printf( '<div><strong>Homepage chart</strong><span>%s</span></div>', esc_html( $settings['homepage_chart'] ) );
-		printf( '<div><strong>Language</strong><span>%s</span></div>', esc_html( $settings['language'] ) );
-		printf( '<div><strong>Date format</strong><span>%s</span></div>', esc_html( $settings['date_format'] ) );
+		printf( '<div><strong>Homepage chart</strong><span>%s</span></div>', esc_html( $settings['homepage_chart'] ? $settings['homepage_chart'] : 'Not set' ) );
+		printf( '<div><strong>Language</strong><span>%s</span></div>', esc_html( $settings['language'] ? $settings['language'] : 'Not set' ) );
+		printf( '<div><strong>Date format</strong><span>%s</span></div>', esc_html( $settings['date_format'] ? $settings['date_format'] : 'Not set' ) );
 		echo '</div>';
 		self::render_panel_end();
 		echo '</section>';
@@ -1513,6 +1596,19 @@ class AMC_Admin {
 			),
 			'amc_row_action'
 		);
+	}
+
+	/**
+	 * Build a confirm-style action url.
+	 *
+	 * @param string $entity Entity.
+	 * @param int    $id Id.
+	 * @param string $task Task.
+	 * @param string $message Message.
+	 * @return string
+	 */
+	private static function confirm_action_url( $entity, $id, $task, $message ) {
+		return add_query_arg( 'amc_confirm', rawurlencode( $message ), self::action_url( $entity, $id, $task ) );
 	}
 
 	/**
@@ -1852,8 +1948,13 @@ class AMC_Admin {
 		$id       = isset( $_REQUEST['id'] ) ? absint( wp_unslash( $_REQUEST['id'] ) ) : 0;
 		$redirect = self::posted_redirect();
 
-		if ( ! $entity || ! $task || ! $id ) {
+		if ( ! $entity || ! $task || ( ! $id && 'export' !== $entity ) ) {
 			self::redirect_notice( $redirect, 'error', 'Missing action payload.' );
+		}
+
+		if ( 'export' === $entity ) {
+			self::assert_cap( 'amc_view_dashboard' );
+			self::export_debug_csv( $task, $id );
 		}
 
 		if ( in_array( $entity, array( 'track', 'artist', 'album' ), true ) ) {
@@ -1925,16 +2026,25 @@ class AMC_Admin {
 				self::redirect_notice( add_query_arg( 'week_id', $result['week_id'], $redirect ), 'success', $result['message'] );
 			} elseif ( 'publish' === $task ) {
 				self::assert_cap( 'amc_publish_charts' );
-				AMC_Ingestion::publish_chart_week( $id );
+				$result = AMC_Ingestion::publish_chart_week( $id );
+				self::redirect_notice( $redirect, empty( $result['success'] ) ? 'warning' : 'success', $result['message'] );
 			} elseif ( 'unpublish' === $task ) {
 				self::assert_cap( 'amc_publish_charts' );
 				AMC_Ingestion::unpublish_chart_week( $id );
+			} elseif ( 'republish' === $task ) {
+				self::assert_cap( 'amc_publish_charts' );
+				$result = AMC_Ingestion::republish_chart_week( $id );
+				self::redirect_notice( $redirect, empty( $result['success'] ) ? 'warning' : 'success', $result['message'] );
 			} elseif ( 'archive' === $task ) {
 				self::assert_cap( 'amc_publish_charts' );
 				AMC_Ingestion::archive_chart_week( $id );
 			} elseif ( 'restore' === $task ) {
 				self::assert_cap( 'amc_publish_charts' );
 				AMC_Ingestion::restore_chart_week( $id );
+			} elseif ( 'rollback' === $task ) {
+				self::assert_cap( 'amc_publish_charts' );
+				$result = AMC_Ingestion::rollback_chart_week( $id );
+				self::redirect_notice( $redirect, empty( $result['success'] ) ? 'warning' : 'success', $result['message'] );
 			} elseif ( 'feature' === $task ) {
 				self::assert_cap( 'amc_publish_charts' );
 				$week = AMC_DB::get_row( 'chart_weeks', $id );
@@ -1966,17 +2076,20 @@ class AMC_Admin {
 			self::assert_cap( 'amc_manage_weeks' );
 
 			if ( 'parse' === $task ) {
-				AMC_Ingestion::parse_upload( $id );
-				self::redirect_notice( add_query_arg( 'upload_id', $id, $redirect ), 'success', 'Upload reparsed successfully.' );
+				$result = AMC_Ingestion::reprocess_upload( $id, array( 'parse' => true, 'match' => false ) );
+				self::redirect_notice( add_query_arg( 'upload_id', $id, $redirect ), empty( $result['success'] ) ? 'error' : 'success', $result['message'] );
 			} elseif ( 'match' === $task ) {
-				AMC_Ingestion::run_matching( $id );
-				self::redirect_notice( add_query_arg( 'upload_id', $id, $redirect ), 'success', 'Matching queue regenerated for upload.' );
+				$result = AMC_Ingestion::reprocess_upload( $id, array( 'parse' => false, 'match' => true ) );
+				self::redirect_notice( add_query_arg( 'upload_id', $id, $redirect ), empty( $result['success'] ) ? 'error' : 'success', $result['message'] );
 			} elseif ( 'generate' === $task ) {
 				$result = AMC_Ingestion::generate_chart_for_upload( $id );
 				if ( empty( $result['success'] ) ) {
 					self::redirect_notice( add_query_arg( 'upload_id', $id, $redirect ), 'error', $result['message'] );
 				}
 				self::redirect_notice( add_query_arg( array( 'upload_id' => $id, 'week_id' => $result['week_id'] ), $redirect ), 'success', $result['message'] );
+			} elseif ( 'commit' === $task ) {
+				$result = AMC_Ingestion::commit_dry_run_upload( $id );
+				self::redirect_notice( add_query_arg( 'upload_id', $id, $redirect ), empty( $result['success'] ) ? 'warning' : 'success', $result['message'] );
 			} elseif ( 'delete' === $task ) {
 				global $wpdb;
 				$rows = AMC_DB::get_rows( 'source_rows', array( 'where' => array( 'upload_id' => $id ) ) );
@@ -2021,7 +2134,7 @@ class AMC_Admin {
 			self::redirect_notice( self::posted_redirect(), 'error', 'Please choose a source file to upload.' );
 		}
 
-		$upload_id = AMC_Ingestion::create_upload(
+		$result = AMC_Ingestion::create_upload(
 			$_FILES['source_file'],
 			array(
 				'source_platform' => isset( $_POST['source_platform'] ) ? sanitize_text_field( wp_unslash( $_POST['source_platform'] ) ) : '',
@@ -2030,14 +2143,69 @@ class AMC_Admin {
 				'chart_date'      => isset( $_POST['chart_date'] ) ? sanitize_text_field( wp_unslash( $_POST['chart_date'] ) ) : current_time( 'Y-m-d' ),
 				'target_chart_id' => isset( $_POST['target_chart_id'] ) ? absint( wp_unslash( $_POST['target_chart_id'] ) ) : 0,
 				'chart_type'      => isset( $_POST['chart_type'] ) ? sanitize_text_field( wp_unslash( $_POST['chart_type'] ) ) : 'track',
+				'dry_run'         => ! empty( $_POST['dry_run'] ) ? 1 : 0,
+				'allow_duplicate' => ! empty( $_POST['allow_duplicate'] ) ? 1 : 0,
 			)
 		);
 
-		if ( ! $upload_id ) {
-			self::redirect_notice( self::posted_redirect(), 'error', 'Upload failed. Check file permissions or file type.' );
+		if ( empty( $result['upload_id'] ) ) {
+			self::redirect_notice( self::posted_redirect(), ! empty( $result['type'] ) ? $result['type'] : 'error', ! empty( $result['message'] ) ? $result['message'] : 'Upload failed. Check file permissions or file type.' );
 		}
 
-		self::redirect_notice( add_query_arg( 'upload_id', $upload_id, self::posted_redirect() ), 'success', 'Source upload saved, parsed, and queued for matching.' );
+		self::redirect_notice( add_query_arg( 'upload_id', $result['upload_id'], self::posted_redirect() ), ! empty( $result['type'] ) ? $result['type'] : 'success', ! empty( $result['message'] ) ? $result['message'] : 'Source upload saved, parsed, and queued for matching.' );
+	}
+
+	/**
+	 * Export debug data as CSV.
+	 *
+	 * @param string $task Export task.
+	 * @param int    $id Context id.
+	 * @return void
+	 */
+	private static function export_debug_csv( $task, $id ) {
+		$rows     = array();
+		$filename = 'kontentainment-charts-export.csv';
+
+		if ( 'logs' === $task ) {
+			$filters = array();
+			if ( $id > 0 ) {
+				$filters['upload_id'] = $id;
+			}
+			$rows     = AMC_Admin_Data::logs( $filters );
+			$filename = $id > 0 ? 'kontentainment-charts-upload-' . $id . '-logs.csv' : 'kontentainment-charts-logs.csv';
+		} elseif ( 'invalid_rows' === $task ) {
+			$rows     = AMC_Ingestion::invalid_rows( $id, 500 );
+			$filename = 'kontentainment-charts-upload-' . $id . '-invalid-rows.csv';
+		} elseif ( 'dropped_out' === $task ) {
+			$week     = AMC_DB::get_row( 'chart_weeks', $id );
+			$rows     = $week && ! empty( $week['dropped_out_json'] ) ? json_decode( $week['dropped_out_json'], true ) : array();
+			$filename = 'kontentainment-charts-week-' . $id . '-dropped-out.csv';
+		} elseif ( 'matching_queue' === $task ) {
+			$rows     = AMC_Admin_Data::matching_candidates();
+			$filename = 'kontentainment-charts-matching-queue.csv';
+		}
+
+		if ( empty( $rows ) ) {
+			self::redirect_notice( self::posted_redirect(), 'warning', 'No exportable records were found for that request.' );
+		}
+
+		nocache_headers();
+		header( 'Content-Type: text/csv; charset=utf-8' );
+		header( 'Content-Disposition: attachment; filename=' . $filename );
+
+		$output = fopen( 'php://output', 'w' );
+		fputcsv( $output, array_keys( (array) reset( $rows ) ) );
+
+		foreach ( $rows as $row ) {
+			$flat = array();
+			foreach ( (array) $row as $value ) {
+				$flat[] = is_array( $value ) ? wp_json_encode( $value ) : $value;
+			}
+			fputcsv( $output, $flat );
+		}
+
+		fclose( $output );
+		exit;
 	}
 
 	/**

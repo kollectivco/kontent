@@ -49,15 +49,25 @@ include AMC_PLUGIN_DIR . 'templates/parts/site-header.php';
 				</div>
 				<div class="amc-summary-card">
 					<span class="amc-section-label">Top Mover</span>
-					<strong><?php echo esc_html( ! empty( $summary['top_mover']['entity']['name'] ) ? $summary['top_mover']['entity']['name'] : 'No change leader' ); ?></strong>
-					<p><?php echo esc_html( ! empty( $summary['top_mover'] ) ? amc_movement_note( $summary['top_mover'] ) : 'Momentum is steady across this chart.' ); ?></p>
+					<strong><?php echo esc_html( ! empty( $summary['top_mover']['entity']['name'] ) ? $summary['top_mover']['entity']['name'] : 'No movement yet' ); ?></strong>
+					<p><?php echo esc_html( ! empty( $summary['top_mover'] ) ? amc_movement_note( $summary['top_mover'] ) : 'This chart will show movement once a live week is published.' ); ?></p>
 				</div>
 			</section>
 
-			<?php
-			$featured = $chart['featured'];
-			include AMC_PLUGIN_DIR . 'templates/parts/featured-item.php';
-			?>
+			<?php if ( ! empty( $chart['entries'] ) && ! empty( $chart['featured'] ) ) : ?>
+				<?php
+				$featured = $chart['featured'];
+				include AMC_PLUGIN_DIR . 'templates/parts/featured-item.php';
+				?>
+			<?php else : ?>
+				<section class="amc-featured amc-featured--<?php echo esc_attr( $chart['accent'] ); ?>">
+					<div class="amc-featured__content">
+						<p class="amc-section-label">No published week yet</p>
+						<h2>This chart is ready for real data.</h2>
+						<p>Publish a chart week for this category to populate rankings, movement, and detail links on the public page.</p>
+					</div>
+				</section>
+			<?php endif; ?>
 
 			<section class="amc-section">
 				<div class="amc-editorial-strip">
@@ -86,7 +96,7 @@ include AMC_PLUGIN_DIR . 'templates/parts/site-header.php';
 			<div class="amc-container">
 				<p class="amc-section-label">Chart Not Found</p>
 				<h1>This chart route is not available yet.</h1>
-				<p>The chart slug did not match any registered chart definition or seeded chart record.</p>
+				<p>The chart slug did not match any active chart record.</p>
 			</div>
 		</section>
 	<?php endif; ?>

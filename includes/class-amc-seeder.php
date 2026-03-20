@@ -1,6 +1,6 @@
 <?php
 /**
- * Demo data seeding for plugin database tables.
+ * Legacy demo-data cleanup utilities.
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -9,189 +9,91 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 class AMC_Seeder {
 	/**
-	 * Seed plugin data if missing.
+	 * Remove legacy seeded/demo content once.
 	 *
 	 * @return void
 	 */
-	public static function seed() {
-		if ( AMC_DB::count_rows( 'charts' ) > 0 ) {
-			update_option( 'amc_demo_seeded', 1, false );
+	public static function cleanup_legacy_demo_content() {
+		$already_cleaned = (int) get_option( 'amc_legacy_demo_cleaned', 0 );
+
+		if ( $already_cleaned ) {
 			return;
 		}
 
-		$payload      = AMC_Data::demo_payload();
-		$definitions  = AMC_Data::chart_definitions();
-		$artist_ids   = array();
-		$album_ids    = array();
-		$track_ids    = array();
-		$chart_ids    = array();
-		$today        = '2026-03-20';
-		$last_week    = '2026-03-13';
+		global $wpdb;
 
-		foreach ( $payload['artists'] as $slug => $artist ) {
-			$artist_ids[ $slug ] = AMC_DB::save_row(
-				'artists',
-				array(
-					'name'              => $artist['name'],
-					'slug'              => $slug,
-					'image'             => '',
-					'aliases'           => '',
-					'bio'               => $artist['description'],
-					'blurb'             => $artist['blurb'],
-					'country'           => $artist['country'],
-					'genre'             => $artist['genres'],
-					'social_links'      => '',
-					'monthly_listeners' => $artist['monthly'],
-					'chart_streak'      => $artist['streak'],
-					'gradient'          => $artist['gradient'],
-					'status'            => 'active',
-				)
-			);
-		}
+		$legacy_chart_slugs = array_keys( AMC_Data::chart_definitions() );
+		$legacy_artist_slugs = array( 'nancy-ajram', 'amr-diab', 'elissa', 'marwan-pablo', 'assala', 'wegz', 'tul8te', 'balqees' );
+		$legacy_track_slugs  = array( 'shabab-el-layl', 'baheb-el-bahr', 'akhbarak-eh', 'ghorba', 'fouq-el-sama', 'dorak-gai', 'kol-youm', 'maa-elsowar' );
+		$legacy_album_slugs  = array( 'noor-nights', 'seaside-radio', 'letters-in-neon', 'parallel-lines', 'golden-room', 'northern-lights' );
 
-		foreach ( $payload['albums'] as $slug => $album ) {
-			$album_ids[ $slug ] = AMC_DB::save_row(
-				'albums',
-				array(
-					'artist_id'     => ! empty( $artist_ids[ $album['artist_slug'] ] ) ? $artist_ids[ $album['artist_slug'] ] : 0,
-					'title'         => $album['title'],
-					'slug'          => $slug,
-					'cover_image'   => '',
-					'description'   => $album['description'],
-					'release_date'  => $album['year'] . '-01-01',
-					'release_year'  => $album['year'],
-					'track_list'    => '',
-					'genre'         => '',
-					'label'         => '',
-					'gradient'      => $album['gradient'],
-					'status'        => 'active',
-				)
-			);
-		}
-
-		foreach ( $payload['tracks'] as $slug => $track ) {
-			$track_ids[ $slug ] = AMC_DB::save_row(
-				'tracks',
-				array(
-					'artist_id'    => ! empty( $artist_ids[ $track['artist_slug'] ] ) ? $artist_ids[ $track['artist_slug'] ] : 0,
-					'album_id'     => ! empty( $track['album_slug'] ) && ! empty( $album_ids[ $track['album_slug'] ] ) ? $album_ids[ $track['album_slug'] ] : 0,
-					'title'        => $track['title'],
-					'slug'         => $slug,
-					'cover_image'  => '',
-					'description'  => $track['description'],
-					'isrc'         => '',
-					'aliases'      => '',
-					'release_date' => '2026-01-01',
-					'genre'        => '',
-					'duration'     => $track['duration'],
-					'gradient'     => $track['gradient'],
-					'status'       => 'active',
-				)
-			);
-		}
-
-		foreach ( $definitions as $slug => $definition ) {
-			$chart_ids[ $slug ] = AMC_DB::save_row(
-				'charts',
-				array(
-					'name'             => $definition['title'],
-					'slug'             => $slug,
-					'description'      => $definition['description'],
-					'type'             => $definition['type'],
-					'cover_image'      => '',
-					'display_order'    => count( $chart_ids ) + 1,
-					'status'           => 'active',
-					'is_featured_home' => in_array( $slug, array( 'top-artists', 'top-tracks', 'hot-100-tracks' ), true ) ? 1 : 0,
-					'archive_enabled'  => 1,
-					'accent'           => $definition['accent'],
-					'kicker'           => $definition['kicker'],
-				)
-			);
-
-			$current_week_id = AMC_DB::save_row(
-				'chart_weeks',
-				array(
-					'chart_id'      => $chart_ids[ $slug ],
-					'country'       => 'Global',
-					'week_date'     => $today,
-					'status'        => 'published',
-					'is_featured'   => 'hot-100-tracks' === $slug ? 1 : 0,
-					'notes'         => 'Auto-seeded published week',
-					'published_at'  => current_time( 'mysql' ),
-					'archived_at'   => null,
-				)
-			);
-
-			$archived_week_id = AMC_DB::save_row(
-				'chart_weeks',
-				array(
-					'chart_id'      => $chart_ids[ $slug ],
-					'country'       => 'Global',
-					'week_date'     => $last_week,
-					'status'        => 'archived',
-					'is_featured'   => 0,
-					'notes'         => 'Auto-seeded archive week',
-					'published_at'  => current_time( 'mysql' ),
-					'archived_at'   => current_time( 'mysql' ),
-				)
-			);
-
-			if ( empty( $payload['charts'][ $slug ]['entries'] ) ) {
-				continue;
-			}
-
-			foreach ( $payload['charts'][ $slug ]['entries'] as $index => $entry ) {
-				$entity_id = 0;
-
-				if ( 'artist' === $entry['entity_type'] && ! empty( $artist_ids[ $entry['slug'] ] ) ) {
-					$entity_id = $artist_ids[ $entry['slug'] ];
-				} elseif ( 'track' === $entry['entity_type'] && ! empty( $track_ids[ $entry['slug'] ] ) ) {
-					$entity_id = $track_ids[ $entry['slug'] ];
-				} elseif ( 'album' === $entry['entity_type'] && ! empty( $album_ids[ $entry['slug'] ] ) ) {
-					$entity_id = $album_ids[ $entry['slug'] ];
-				}
-
-				$entry_data = array(
-					'entity_type'    => $entry['entity_type'],
-					'entity_id'      => $entity_id,
-					'current_rank'   => $entry['current_rank'],
-					'previous_rank'  => $entry['last_rank'],
-					'peak_rank'      => $entry['peak_rank'],
-					'weeks_on_chart' => $entry['weeks_on_chart'],
-					'movement'       => $entry['movement'],
-					'score'          => 100 - $index,
-					'score_change'   => 0,
-					'source_count'   => 1,
-					'artwork'        => '',
-				);
-
-				AMC_DB::save_row( 'chart_entries', array_merge( $entry_data, array( 'chart_week_id' => $current_week_id ) ) );
-
-				$archived_entry = $entry_data;
-				$archived_entry['chart_week_id']   = $archived_week_id;
-				$archived_entry['current_rank']    = max( 1, $entry['current_rank'] + ( 'up' === $entry['movement'] ? 1 : -1 ) );
-				$archived_entry['previous_rank']   = $entry['current_rank'];
-				$archived_entry['movement']        = 'same';
-				$archived_entry['score']           = 95 - $index;
-				$archived_entry['score_change']    = 0;
-				$archived_entry['source_count']    = 1;
-				AMC_DB::save_row( 'chart_entries', $archived_entry );
-			}
-		}
-
-		AMC_DB::save_settings(
-			array(
-				'platform_name'    => 'Kontentainment Charts',
-				'logo'             => 'kontentainment-charts-mark.svg',
-				'seo_defaults'     => 'Enable chart-specific metadata',
-				'social_image'     => 'weekly-share-default.jpg',
-				'homepage_chart'   => 'hot-100-tracks',
-				'methodology_text' => 'Custom weighted methodology summary',
-				'language'         => 'English',
-				'date_format'      => 'F j, Y',
-			)
+		$legacy_markers = array(
+			'amc_demo_seeded' => (int) get_option( 'amc_demo_seeded', 0 ),
+			'seeded_weeks'    => (int) $wpdb->get_var( "SELECT COUNT(*) FROM " . AMC_DB::table( 'chart_weeks' ) . " WHERE notes IN ('Auto-seeded published week', 'Auto-seeded archive week')" ), // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+			'legacy_charts'   => self::count_slug_matches( 'charts', $legacy_chart_slugs ),
+			'legacy_artists'  => self::count_slug_matches( 'artists', $legacy_artist_slugs ),
+			'legacy_tracks'   => self::count_slug_matches( 'tracks', $legacy_track_slugs ),
+			'legacy_albums'   => self::count_slug_matches( 'albums', $legacy_album_slugs ),
 		);
 
-		update_option( 'amc_demo_seeded', 1, false );
+		if ( ! array_filter( $legacy_markers ) ) {
+			update_option( 'amc_legacy_demo_cleaned', 1, false );
+			return;
+		}
+
+		$delete_by_slug = function ( $table_key, $slugs ) use ( $wpdb ) {
+			if ( empty( $slugs ) ) {
+				return;
+			}
+
+			$placeholders = implode( ',', array_fill( 0, count( $slugs ), '%s' ) );
+			$table        = AMC_DB::table( $table_key );
+			$sql          = $wpdb->prepare( "DELETE FROM {$table} WHERE slug IN ({$placeholders})", $slugs ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+			$wpdb->query( $sql ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+		};
+
+		$week_ids = $wpdb->get_col( "SELECT id FROM " . AMC_DB::table( 'chart_weeks' ) . " WHERE notes IN ('Auto-seeded published week', 'Auto-seeded archive week')" ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+
+		if ( ! empty( $week_ids ) ) {
+			$placeholders = implode( ',', array_fill( 0, count( $week_ids ), '%d' ) );
+			$entries_sql  = $wpdb->prepare( "DELETE FROM " . AMC_DB::table( 'chart_entries' ) . " WHERE chart_week_id IN ({$placeholders})", $week_ids ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+			$weeks_sql    = $wpdb->prepare( "DELETE FROM " . AMC_DB::table( 'chart_weeks' ) . " WHERE id IN ({$placeholders})", $week_ids ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+			$wpdb->query( $entries_sql ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+			$wpdb->query( $weeks_sql ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+		}
+
+		$delete_by_slug( 'tracks', $legacy_track_slugs );
+		$delete_by_slug( 'albums', $legacy_album_slugs );
+		$delete_by_slug( 'artists', $legacy_artist_slugs );
+		$delete_by_slug( 'charts', $legacy_chart_slugs );
+
+		$wpdb->query( "DELETE FROM " . AMC_DB::table( 'source_uploads' ) . " WHERE preview_text LIKE '%seeded%' OR error_message LIKE '%seeded%'" ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+		$wpdb->query( "DELETE FROM " . AMC_DB::table( 'ingestion_logs' ) . " WHERE message LIKE '%seeded%' OR message LIKE '%demo%'" ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+		$wpdb->query( "DELETE FROM " . AMC_DB::table( 'scoring_rules' ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+		$wpdb->query( "DELETE FROM " . AMC_DB::table( 'platform_settings' ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+
+		delete_option( 'amc_demo_seeded' );
+		update_option( 'amc_legacy_demo_cleaned', 1, false );
+	}
+
+	/**
+	 * Count rows matching legacy slugs.
+	 *
+	 * @param string $table_key Table key.
+	 * @param array  $slugs Slugs.
+	 * @return int
+	 */
+	private static function count_slug_matches( $table_key, $slugs ) {
+		global $wpdb;
+
+		if ( empty( $slugs ) ) {
+			return 0;
+		}
+
+		$placeholders = implode( ',', array_fill( 0, count( $slugs ), '%s' ) );
+		$table        = AMC_DB::table( $table_key );
+		$sql          = $wpdb->prepare( "SELECT COUNT(*) FROM {$table} WHERE slug IN ({$placeholders})", $slugs ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+
+		return (int) $wpdb->get_var( $sql ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
 	}
 }

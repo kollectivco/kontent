@@ -11,7 +11,7 @@ class AMC_DB {
 	/**
 	 * Database version.
 	 */
-	const VERSION = '1.3.0';
+	const VERSION = '1.4.0';
 
 	/**
 	 * Table suffixes.
@@ -245,10 +245,15 @@ class AMC_DB {
 				file_url text NOT NULL,
 				mime_type varchar(191) NULL,
 				file_size bigint(20) unsigned NOT NULL DEFAULT 0,
+				file_hash varchar(64) NULL,
+				is_duplicate tinyint(1) NOT NULL DEFAULT 0,
+				duplicate_of_upload_id bigint(20) unsigned NOT NULL DEFAULT 0,
+				is_dry_run tinyint(1) NOT NULL DEFAULT 0,
 				file_status varchar(20) NOT NULL DEFAULT 'uploaded',
 				generated_week_id bigint(20) unsigned NOT NULL DEFAULT 0,
 				row_count int(11) NOT NULL DEFAULT 0,
 				preview_text text NULL,
+				diagnostic_summary longtext NULL,
 				uploader_id bigint(20) unsigned NOT NULL DEFAULT 0,
 				parser_name varchar(191) NULL,
 				error_message text NULL,
@@ -261,7 +266,8 @@ class AMC_DB {
 				KEY source_platform (source_platform),
 				KEY target_chart_id (target_chart_id),
 				KEY chart_type (chart_type),
-				KEY country (country)
+				KEY country (country),
+				KEY file_hash (file_hash)
 			) {$charset_collate};"
 		);
 
@@ -661,13 +667,13 @@ class AMC_DB {
 	public static function get_settings() {
 		$defaults = array(
 			'platform_name'    => 'Kontentainment Charts',
-			'logo'             => 'kontentainment-charts-mark.svg',
-			'seo_defaults'     => 'Enable chart-specific metadata',
-			'social_image'     => 'weekly-share-default.jpg',
-			'homepage_chart'   => 'hot-100-tracks',
-			'methodology_text' => 'Custom weighted methodology summary',
-			'language'         => 'English',
-			'date_format'      => 'F j, Y',
+			'logo'             => '',
+			'seo_defaults'     => '',
+			'social_image'     => '',
+			'homepage_chart'   => '',
+			'methodology_text' => '',
+			'language'         => '',
+			'date_format'      => '',
 		);
 
 		global $wpdb;
@@ -679,6 +685,124 @@ class AMC_DB {
 		}
 
 		return $defaults;
+	}
+
+	/**
+	 * Find duplicate upload by operational identity.
+	 *
+	 * @param string $file_hash File hash.
+	 * @param string $platform Source platform.
+	 * @param int    $chart_id Chart id.
+	 * @param string $country Country.
+	 * @param string $chart_date Chart date.
+	 * @param int    $exclude_id Upload id to exclude.
+	 * @return array|null
+	 */
+	public static function find_duplicate_upload( $file_hash, $platform, $chart_id, $country, $chart_date, $exclude_id = 0 ) {
+		global $wpdb;
+
+		$table = self::table( 'source_uploads' );
+		$sql   = "SELECT * FROM {$table} WHERE file_hash = %s AND source_platform = %s AND target_chart_id = %d AND country = %s AND chart_date = %s";
+		$args  = array(
+			(string) $file_hash,
+			(string) $platform,
+			absint( $chart_id ),
+			(string) $country,
+			(string) $chart_date,
+		);
+
+		if ( $exclude_id > 0 ) {
+			$sql   .= ' AND id != %d';
+			$args[] = absint( $exclude_id );
+		}
+
+		$sql .= ' ORDER BY id DESC LIMIT 1';
+		$row  = $wpdb->get_row( $wpdb->prepare( $sql, $args ), ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+
+		return $row ? $row : null;
+	}
+
+	/**
+	 * Query ingestion logs with optional filters.
+	 *
+	 * @param array $filters Filters.
+	 * @return array
+	 */
+	public static function get_ingestion_logs( $filters = array() ) {
+		global $wpdb;
+
+		$defaults      = array(
+			'upload_id'       => 0,
+			'source_platform' => '',
+			'country'         => '',
+			'target_chart_id' => 0,
+			'upload_status'   => '',
+			'level'           => '',
+			'date_from'       => '',
+			'date_to'         => '',
+			'limit'           => 100,
+		);
+		$filters       = wp_parse_args( $filters, $defaults );
+		$logs_table     = self::table( 'ingestion_logs' );
+		$uploads_table  = self::table( 'source_uploads' );
+		$where          = array( '1=1' );
+		$values         = array();
+
+		if ( ! empty( $filters['upload_id'] ) ) {
+			$where[]  = 'l.upload_id = %d';
+			$values[] = absint( $filters['upload_id'] );
+		}
+
+		if ( ! empty( $filters['source_platform'] ) ) {
+			$where[]  = 'u.source_platform = %s';
+			$values[] = (string) $filters['source_platform'];
+		}
+
+		if ( ! empty( $filters['country'] ) ) {
+			$where[]  = 'u.country = %s';
+			$values[] = (string) $filters['country'];
+		}
+
+		if ( ! empty( $filters['target_chart_id'] ) ) {
+			$where[]  = 'u.target_chart_id = %d';
+			$values[] = absint( $filters['target_chart_id'] );
+		}
+
+		if ( ! empty( $filters['upload_status'] ) ) {
+			$where[]  = 'u.file_status = %s';
+			$values[] = (string) $filters['upload_status'];
+		}
+
+		if ( ! empty( $filters['level'] ) ) {
+			$where[]  = 'l.level = %s';
+			$values[] = (string) $filters['level'];
+		}
+
+		if ( ! empty( $filters['date_from'] ) ) {
+			$where[]  = 'DATE(l.created_at) >= %s';
+			$values[] = (string) $filters['date_from'];
+		}
+
+		if ( ! empty( $filters['date_to'] ) ) {
+			$where[]  = 'DATE(l.created_at) <= %s';
+			$values[] = (string) $filters['date_to'];
+		}
+
+		$sql = "SELECT l.*, u.source_platform, u.country, u.target_chart_id, u.file_status
+			FROM {$logs_table} l
+			LEFT JOIN {$uploads_table} u ON u.id = l.upload_id
+			WHERE " . implode( ' AND ', $where ) . '
+			ORDER BY l.id DESC';
+
+		if ( ! empty( $filters['limit'] ) ) {
+			$sql .= ' LIMIT ' . absint( $filters['limit'] );
+		}
+
+		if ( ! empty( $values ) ) {
+			$sql = $wpdb->prepare( $sql, $values ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+		}
+
+		return $wpdb->get_results( $sql, ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
 	}
 
 	/**

@@ -34,10 +34,9 @@ class AMC_Plugin {
 	private function __construct() {
 		add_action( 'init', array( 'AMC_DB', 'maybe_install' ), 1 );
 		add_action( 'init', array( 'AMC_Capabilities', 'install' ), 2 );
-		add_action( 'init', array( 'AMC_Ingestion', 'ensure_defaults' ), 3 );
 		add_action( 'init', array( $this, 'register_content_types' ), 5 );
 		add_action( 'init', array( 'AMC_Routing', 'register_routes' ), 20 );
-		add_action( 'init', array( $this, 'maybe_seed_demo_content' ), 30 );
+		add_action( 'init', array( $this, 'maybe_cleanup_legacy_demo_content' ), 30 );
 		add_action( 'wp_enqueue_scripts', array( $this, 'enqueue_assets' ) );
 		add_filter( 'query_vars', array( 'AMC_Routing', 'register_query_vars' ) );
 		add_filter( 'template_include', array( 'AMC_Routing', 'template_include' ) );
@@ -56,10 +55,9 @@ class AMC_Plugin {
 		$plugin = self::instance();
 		AMC_DB::install();
 		AMC_Capabilities::install();
-		AMC_Ingestion::ensure_defaults();
 		$plugin->register_content_types();
 		AMC_Routing::register_routes();
-		AMC_Seeder::seed();
+		AMC_Seeder::cleanup_legacy_demo_content();
 		flush_rewrite_rules();
 	}
 
@@ -230,19 +228,12 @@ class AMC_Plugin {
 	}
 
 	/**
-	 * Seed demo data if plugin was copied in without activation running.
+	 * Clean up legacy demo data from older plugin phases.
 	 *
 	 * @return void
 	 */
-	public function maybe_seed_demo_content() {
-		$already_seeded = (int) get_option( 'amc_demo_seeded', 0 );
-		$has_home_data  = AMC_DB::count_rows( 'charts' );
-
-		if ( $already_seeded && $has_home_data ) {
-			return;
-		}
-
-		AMC_Seeder::seed();
+	public function maybe_cleanup_legacy_demo_content() {
+		AMC_Seeder::cleanup_legacy_demo_content();
 	}
 
 	/**

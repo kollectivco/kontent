@@ -12,7 +12,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 		<div>
 			<p class="amc-footer__eyebrow">Kontentainment Charts</p>
 			<h2>Kontentainment Charts</h2>
-			<p>Public-facing plugin experience seeded with demo artists, tracks, albums, and dynamic chart categories ready for future expansion.</p>
+			<p>Public-facing chart experience powered by real chart categories, real chart weeks, and plugin-owned routes ready for live publishing.</p>
 		</div>
 		<div class="amc-footer__links">
 			<a href="<?php echo esc_url( AMC_Data::route_url( 'charts' ) ); ?>">Browse Charts</a>

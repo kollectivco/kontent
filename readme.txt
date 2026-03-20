@@ -3,11 +3,11 @@ Contributors: kollectivco
 Tags: music, charts, artists, tracks, albums
 Requires at least: 6.0
 Tested up to: 6.5
-Stable tag: 3.3.0
+Stable tag: 3.4.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
-Premium public-facing music charts experience and control center for WordPress with plugin-based routing, seeded demo data, editorial frontend, and plugin-owned admin views.
+Premium public-facing music charts experience and control center for WordPress with plugin-based routing, editorial frontend, and plugin-owned admin views.
 
 == Description ==
 
@@ -19,7 +19,6 @@ Features:
 * Top Artists, Top Tracks, Top Albums
 * Hot 100 Tracks and Hot 100 Artists
 * Track and artist detail routes
-* Seeded demo artists, tracks, albums, and chart entries
 * GitHub-based update flow for future plugin versions
 * Hybrid admin architecture with lightweight wp-admin controls and a full custom dashboard at `/charts-dashboard`
 
@@ -30,6 +29,12 @@ Features:
 3. Visit Settings > Permalinks once or reactivate the plugin to refresh routes.
 
 == Changelog ==
+
+= 3.4.1 =
+* Removed all automatic demo seeding and mock fallback content, added legacy demo cleanup, and switched the plugin to production-style empty states for fresh installs.
+
+= 3.4.0 =
+* Added operational QA tools with filtered ingestion diagnostics, duplicate upload protection, dry-run validation mode, export/debug helpers, and reprocessing plus rollback publishing controls.
 
 = 3.3.0 =
 * Added real XLSX/XLS support, stronger parser validation, smarter matching confidence levels, row-level validation feedback, improved dropped-out visibility, and more flexible scoring methodology controls.

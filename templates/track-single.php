@@ -59,12 +59,12 @@ include AMC_PLUGIN_DIR . 'templates/parts/site-header.php';
 					<div class="amc-summary-card">
 						<span class="amc-section-label">Current Reach</span>
 						<strong><?php echo esc_html( $track['artist']['monthly'] ); ?></strong>
-						<p>Current seeded audience metric attached to the lead artist profile.</p>
+						<p>Current audience metric attached to the lead artist profile when available.</p>
 					</div>
 					<div class="amc-summary-card">
 						<span class="amc-section-label">Chart Footprint</span>
 						<strong><?php echo esc_html( count( $track_positions ) ); ?> lists</strong>
-						<p>How many seeded charts currently feature this song.</p>
+						<p>How many live charts currently feature this song.</p>
 					</div>
 				</div>
 			</div>
@@ -99,7 +99,7 @@ include AMC_PLUGIN_DIR . 'templates/parts/site-header.php';
 							</div>
 						<?php endforeach; ?>
 					<?php else : ?>
-						<p>No related chart placements have been seeded for this track yet.</p>
+						<p>No related chart placements are live for this track yet.</p>
 					<?php endif; ?>
 				</div>
 			</div>
@@ -124,7 +124,7 @@ include AMC_PLUGIN_DIR . 'templates/parts/site-header.php';
 							</div>
 						<?php endforeach; ?>
 					<?php else : ?>
-						<p>More related songs will appear here as additional seeded releases are added.</p>
+						<p>More related songs will appear here as additional releases and chart links are added.</p>
 					<?php endif; ?>
 				</div>
 

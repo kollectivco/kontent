@@ -14,30 +14,7 @@ class AMC_Ingestion {
 	 * @return void
 	 */
 	public static function ensure_defaults() {
-		if ( AMC_DB::count_rows( 'scoring_rules' ) > 0 ) {
-			return;
-		}
-
-		$defaults = array(
-			array( 'rule_group' => 'weight', 'rule_key' => 'spotify_weight', 'rule_value' => '30', 'rule_type' => 'number', 'sort_order' => 1 ),
-			array( 'rule_group' => 'weight', 'rule_key' => 'youtube_music_weight', 'rule_value' => '22', 'rule_type' => 'number', 'sort_order' => 2 ),
-			array( 'rule_group' => 'weight', 'rule_key' => 'tiktok_weight', 'rule_value' => '18', 'rule_type' => 'number', 'sort_order' => 3 ),
-			array( 'rule_group' => 'weight', 'rule_key' => 'shazam_weight', 'rule_value' => '12', 'rule_type' => 'number', 'sort_order' => 4 ),
-			array( 'rule_group' => 'weight', 'rule_key' => 'apple_music_weight', 'rule_value' => '10', 'rule_type' => 'number', 'sort_order' => 5 ),
-			array( 'rule_group' => 'weight', 'rule_key' => 'anghami_weight', 'rule_value' => '8', 'rule_type' => 'number', 'sort_order' => 6 ),
-			array( 'rule_group' => 'methodology', 'rule_key' => 'minimum_release_age', 'rule_value' => '3 days before chart cut-off', 'rule_type' => 'text', 'sort_order' => 10 ),
-			array( 'rule_group' => 'methodology', 'rule_key' => 'minimum_source_coverage', 'rule_value' => 'At least 2 eligible sources', 'rule_type' => 'text', 'sort_order' => 11 ),
-			array( 'rule_group' => 'methodology', 'rule_key' => 'manual_editorial_override', 'rule_value' => 'Allowed with approval note', 'rule_type' => 'text', 'sort_order' => 12 ),
-			array( 'rule_group' => 'methodology', 'rule_key' => 'catalog_reentry_threshold', 'rule_value' => '85 methodology score', 'rule_type' => 'text', 'sort_order' => 13 ),
-			array( 'rule_group' => 'methodology', 'rule_key' => 'growth_bonus_multiplier', 'rule_value' => '1.0', 'rule_type' => 'number', 'sort_order' => 14 ),
-			array( 'rule_group' => 'methodology', 'rule_key' => 'fallback_metric_behavior', 'rule_value' => 'Use rank fallback when source metric is missing', 'rule_type' => 'text', 'sort_order' => 15 ),
-			array( 'rule_group' => 'methodology', 'rule_key' => 'minimum_source_count', 'rule_value' => '1', 'rule_type' => 'number', 'sort_order' => 16 ),
-			array( 'rule_group' => 'methodology', 'rule_key' => 'eligibility_mode', 'rule_value' => 'Allow single-source entries unless minimum source count blocks them', 'rule_type' => 'text', 'sort_order' => 17 ),
-		);
-
-		foreach ( $defaults as $rule ) {
-			AMC_DB::save_row( 'scoring_rules', $rule );
-		}
+		return;
 	}
 
 	/**
@@ -45,7 +22,7 @@ class AMC_Ingestion {
 	 *
 	 * @param array $file File array.
 	 * @param array $data Form data.
-	 * @return int
+	 * @return array
 	 */
 	public static function create_upload( $file, $data ) {
 		require_once ABSPATH . 'wp-admin/includes/file.php';
@@ -56,21 +33,40 @@ class AMC_Ingestion {
 		$chart_date = ! empty( $data['chart_date'] ) ? sanitize_text_field( $data['chart_date'] ) : current_time( 'Y-m-d' );
 		$chart_week = ! empty( $data['chart_week'] ) ? sanitize_text_field( $data['chart_week'] ) : $chart_date;
 		$chart_id   = ! empty( $data['target_chart_id'] ) ? absint( $data['target_chart_id'] ) : 0;
+		$dry_run    = ! empty( $data['dry_run'] ) ? 1 : 0;
+		$override_duplicate = ! empty( $data['allow_duplicate'] );
 		$chart      = $chart_id ? AMC_DB::get_row( 'charts', $chart_id ) : null;
 
 		if ( ! $platform || ! $chart_type || ! $chart_id || ! $chart ) {
-			return 0;
+			return array(
+				'success'  => false,
+				'type'     => 'error',
+				'upload_id'=> 0,
+				'message'  => 'Upload metadata is incomplete. Choose source platform, chart, country, chart date, and chart type.',
+			);
 		}
 
 		if ( ! empty( $chart['type'] ) && $chart['type'] !== $chart_type ) {
-			return 0;
+			return array(
+				'success'  => false,
+				'type'     => 'error',
+				'upload_id'=> 0,
+				'message'  => 'The selected chart type does not match the target chart.',
+			);
 		}
 
 		$upload = wp_handle_upload( $file, array( 'test_form' => false ) );
 
 		if ( ! empty( $upload['error'] ) ) {
-			return 0;
+			return array(
+				'success'  => false,
+				'type'     => 'error',
+				'upload_id'=> 0,
+				'message'  => $upload['error'],
+			);
 		}
+
+		$file_hash = file_exists( $upload['file'] ) ? md5_file( $upload['file'] ) : '';
 
 		$upload_id = AMC_DB::save_row(
 			'source_uploads',
@@ -87,10 +83,15 @@ class AMC_Ingestion {
 				'file_url'          => $upload['url'],
 				'mime_type'         => ! empty( $upload['type'] ) ? $upload['type'] : '',
 				'file_size'         => file_exists( $upload['file'] ) ? filesize( $upload['file'] ) : 0,
+				'file_hash'         => $file_hash,
+				'is_duplicate'      => 0,
+				'duplicate_of_upload_id' => 0,
+				'is_dry_run'        => $dry_run,
 				'file_status'       => 'uploaded',
 				'generated_week_id' => 0,
 				'row_count'         => 0,
 				'preview_text'      => '',
+				'diagnostic_summary'=> '',
 				'uploader_id'       => get_current_user_id(),
 				'parser_name'       => '',
 				'error_message'     => '',
@@ -98,7 +99,50 @@ class AMC_Ingestion {
 		);
 
 		if ( ! $upload_id ) {
-			return 0;
+			return array(
+				'success'  => false,
+				'type'     => 'error',
+				'upload_id'=> 0,
+				'message'  => 'The upload record could not be created.',
+			);
+		}
+
+		$duplicate = $file_hash ? AMC_DB::find_duplicate_upload( $file_hash, $platform, $chart_id, $country, $chart_date, $upload_id ) : null;
+
+		if ( $duplicate ) {
+			AMC_DB::save_row(
+				'source_uploads',
+				array(
+					'is_duplicate'           => 1,
+					'duplicate_of_upload_id' => (int) $duplicate['id'],
+				),
+				$upload_id
+			);
+
+			self::log(
+				$upload_id,
+				0,
+				'duplicate',
+				'warning',
+				'Likely duplicate upload detected.',
+				array(
+					'duplicate_of_upload_id' => (int) $duplicate['id'],
+					'file_hash'              => $file_hash,
+				)
+			);
+
+			if ( ! $override_duplicate ) {
+				$message = sprintf( 'Likely duplicate upload detected against upload #%d for the same source, chart, country, and week. Re-upload with duplicate override if you want to process it anyway.', (int) $duplicate['id'] );
+				self::fail_upload( $upload_id, $message, 'duplicate-detection' );
+				return array(
+					'success'  => false,
+					'type'     => 'warning',
+					'upload_id'=> $upload_id,
+					'message'  => $message,
+				);
+			}
+
+			self::log( $upload_id, 0, 'duplicate_override', 'warning', 'Duplicate override approved by admin. Upload processing continued.', array( 'duplicate_of_upload_id' => (int) $duplicate['id'] ) );
 		}
 
 		self::log(
@@ -120,7 +164,12 @@ class AMC_Ingestion {
 			self::run_matching( $upload_id );
 		}
 
-		return $upload_id;
+		return array(
+			'success'  => true,
+			'type'     => $dry_run ? 'warning' : 'success',
+			'upload_id'=> $upload_id,
+			'message'  => $dry_run ? 'Dry-run upload saved, validated, and queued for review without entering live generation pools.' : 'Source upload saved, parsed, and queued for matching.',
+		);
 	}
 
 	/**
@@ -167,6 +216,7 @@ class AMC_Ingestion {
 
 		$count   = 0;
 		$preview = array();
+		$invalid = 0;
 
 		foreach ( $parser_result['rows'] as $index => $mapped ) {
 			$row_id = AMC_DB::save_row(
@@ -214,6 +264,7 @@ class AMC_Ingestion {
 			}
 
 			if ( ! empty( $mapped['validation_status'] ) && 'valid' !== $mapped['validation_status'] ) {
+				++$invalid;
 				self::log( $upload_id, (int) $row_id, 'validation', 'warning', $mapped['validation_message'], array( 'row_index' => $index + 1 ) );
 			}
 
@@ -226,13 +277,21 @@ class AMC_Ingestion {
 				'file_status'   => 'parsed',
 				'row_count'     => $count,
 				'preview_text'  => implode( ' | ', array_filter( $preview ) ),
+				'diagnostic_summary' => wp_json_encode(
+					array(
+						'row_count'     => $count,
+						'invalid_rows'  => $invalid,
+						'valid_rows'    => max( 0, $count - $invalid ),
+						'parser'        => $parser_result['parser_name'],
+					)
+				),
 				'parser_name'   => $parser_result['parser_name'],
 				'error_message' => '',
 			),
 			$upload_id
 		);
 
-		self::log( $upload_id, 0, 'parse', 'info', 'Upload parsed into normalized source rows.', array( 'row_count' => $count, 'parser' => $parser_result['parser_name'] ) );
+		self::log( $upload_id, 0, 'parse', 'info', 'Upload parsed into normalized source rows.', array( 'row_count' => $count, 'invalid_rows' => $invalid, 'parser' => $parser_result['parser_name'] ) );
 
 		return true;
 	}
@@ -347,6 +406,7 @@ class AMC_Ingestion {
 		}
 
 		self::sync_upload_status_from_rows( $upload_id );
+		self::refresh_upload_diagnostics( $upload_id );
 		self::log( $upload_id, 0, 'match', 'info', 'Matching queue generated for upload.', array( 'rows' => count( $rows ) ) );
 	}
 
@@ -415,8 +475,45 @@ class AMC_Ingestion {
 		}
 
 		self::sync_upload_status_from_rows( (int) $queue['upload_id'] );
+		self::refresh_upload_diagnostics( (int) $queue['upload_id'] );
 		self::log( (int) $queue['upload_id'], $source_row_id, 'matching_decision', 'info', 'Matching queue decision stored.', array( 'decision' => $decision ) );
 		return true;
+	}
+
+	/**
+	 * Reprocess an upload through parse and/or matching.
+	 *
+	 * @param int   $upload_id Upload id.
+	 * @param array $steps Steps.
+	 * @return array
+	 */
+	public static function reprocess_upload( $upload_id, $steps = array() ) {
+		$defaults = array(
+			'parse' => true,
+			'match' => true,
+		);
+		$steps    = wp_parse_args( $steps, $defaults );
+
+		if ( ! empty( $steps['parse'] ) ) {
+			$parsed = self::parse_upload( $upload_id );
+			if ( ! $parsed ) {
+				return array(
+					'success' => false,
+					'message' => 'Upload reparse failed. Check parser diagnostics and invalid-row output.',
+				);
+			}
+		}
+
+		if ( ! empty( $steps['match'] ) ) {
+			self::run_matching( $upload_id );
+		}
+
+		self::log( $upload_id, 0, 'reprocess', 'info', 'Upload reprocessing completed.', $steps );
+
+		return array(
+			'success' => true,
+			'message' => 'Upload reprocessing completed successfully.',
+		);
 	}
 
 	/**
@@ -472,12 +569,14 @@ class AMC_Ingestion {
 				AND u.country = %s
 				AND u.chart_date = %s
 				AND u.chart_type = %s
+				AND u.is_dry_run = %d
 				AND r.matching_status = %s
 			ORDER BY r.rank ASC, r.id ASC",
 			$chart_id,
 			$country,
 			$chart_date,
 			$chart_type,
+			0,
 			'matched'
 		); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 		$rows          = $wpdb->get_results( $sql, ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
@@ -602,16 +701,57 @@ class AMC_Ingestion {
 	}
 
 	/**
+	 * Regenerate a chart week by id.
+	 *
+	 * @param int $week_id Week id.
+	 * @return array
+	 */
+	public static function regenerate_chart_week( $week_id ) {
+		$week = AMC_DB::get_row( 'chart_weeks', $week_id );
+		$chart = $week ? AMC_DB::get_row( 'charts', (int) $week['chart_id'] ) : null;
+
+		if ( ! $week || ! $chart ) {
+			return array(
+				'success' => false,
+				'message' => 'Chart week could not be found for regeneration.',
+			);
+		}
+
+		return self::generate_chart_week( (int) $week['chart_id'], $week['country'], $week['week_date'], $chart['type'] );
+	}
+
+	/**
 	 * Publish a chart week and mark its source uploads live.
 	 *
 	 * @param int $week_id Week id.
-	 * @return bool
+	 * @param bool $force Whether to republish already-published weeks.
+	 * @return array
 	 */
-	public static function publish_chart_week( $week_id ) {
+	public static function publish_chart_week( $week_id, $force = false ) {
 		$week = AMC_DB::get_row( 'chart_weeks', $week_id );
 
 		if ( ! $week ) {
-			return false;
+			return array(
+				'success' => false,
+				'message' => 'Chart week could not be found.',
+			);
+		}
+
+		if ( 'published' === $week['status'] && ! $force ) {
+			return array(
+				'success' => false,
+				'message' => 'This chart week is already live. Use republish only when you intentionally want to refresh the live timestamp.',
+			);
+		}
+
+		$safety = self::publication_safety_check( $week_id );
+
+		if ( empty( $safety['success'] ) ) {
+			self::log( 0, 0, 'publishing_check', 'warning', 'Publishing safety check blocked publication.', array( 'chart_week_id' => (int) $week_id, 'issues' => $safety['issues'] ) );
+			return array(
+				'success' => false,
+				'message' => implode( ' ', $safety['issues'] ),
+			);
 		}
 
 		AMC_DB::save_row(
@@ -625,8 +765,54 @@ class AMC_Ingestion {
 		);
 
 		self::set_uploads_status_for_week( $week_id, 'published' );
-		self::log( 0, 0, 'publishing', 'info', 'Chart week published.', array( 'chart_week_id' => (int) $week_id ) );
-		return true;
+		self::log( 0, 0, $force ? 'republishing' : 'publishing', 'info', $force ? 'Chart week republished.' : 'Chart week published.', array( 'chart_week_id' => (int) $week_id ) );
+		return array(
+			'success' => true,
+			'message' => $force ? 'Chart week republished successfully.' : 'Chart week published successfully.',
+		);
+	}
+
+	/**
+	 * Republish a chart week.
+	 *
+	 * @param int $week_id Week id.
+	 * @return array
+	 */
+	public static function republish_chart_week( $week_id ) {
+		return self::publish_chart_week( $week_id, true );
+	}
+
+	/**
+	 * Run publication safety checks for a week.
+	 *
+	 * @param int $week_id Week id.
+	 * @return array
+	 */
+	public static function publication_safety_check( $week_id ) {
+		$week   = AMC_DB::get_row( 'chart_weeks', $week_id );
+		$issues = array();
+
+		if ( ! $week ) {
+			return array(
+				'success' => false,
+				'issues'  => array( 'Chart week could not be found.' ),
+			);
+		}
+
+		$entries = AMC_DB::get_chart_entries( $week_id );
+
+		if ( empty( $entries ) ) {
+			$issues[] = 'Chart week has no generated entries.';
+		}
+
+		if ( 'archived' === $week['status'] ) {
+			$issues[] = 'Archived weeks should be restored to draft before publishing.';
+		}
+
+		return array(
+			'success' => empty( $issues ),
+			'issues'  => $issues,
+		);
 	}
 
 	/**
@@ -654,6 +840,44 @@ class AMC_Ingestion {
 		self::set_uploads_status_for_week( $week_id, 'generated' );
 		self::log( 0, 0, 'publishing', 'info', 'Chart week unpublished back to draft.', array( 'chart_week_id' => (int) $week_id ) );
 		return true;
+	}
+
+	/**
+	 * Roll back a week to the previous published week for the same chart + country.
+	 *
+	 * @param int $week_id Week id.
+	 * @return array
+	 */
+	public static function rollback_chart_week( $week_id ) {
+		$week = AMC_DB::get_row( 'chart_weeks', $week_id );
+
+		if ( ! $week ) {
+			return array(
+				'success' => false,
+				'message' => 'Chart week could not be found for rollback.',
+			);
+		}
+
+		$previous = self::get_previous_published_week( (int) $week['chart_id'], $week['country'], $week['week_date'] );
+
+		if ( ! $previous ) {
+			return array(
+				'success' => false,
+				'message' => 'No previous published week was found for rollback.',
+			);
+		}
+
+		if ( 'published' === $week['status'] ) {
+			self::unpublish_chart_week( $week_id );
+		}
+
+		$result = self::publish_chart_week( (int) $previous['id'], true );
+		self::log( 0, 0, 'rollback', 'warning', 'Rollback to previous published week executed.', array( 'from_week_id' => (int) $week_id, 'to_week_id' => (int) $previous['id'] ) );
+
+		return array(
+			'success' => ! empty( $result['success'] ),
+			'message' => ! empty( $result['success'] ) ? sprintf( 'Rollback completed. Week #%d is live again.', (int) $previous['id'] ) : $result['message'],
+		);
 	}
 
 	/**
@@ -729,6 +953,66 @@ class AMC_Ingestion {
 	}
 
 	/**
+	 * Get invalid rows for an upload.
+	 *
+	 * @param int $upload_id Upload id.
+	 * @param int $limit Limit.
+	 * @return array
+	 */
+	public static function invalid_rows( $upload_id, $limit = 100 ) {
+		return AMC_DB::get_rows(
+			'source_rows',
+			array(
+				'where'    => array(
+					'upload_id' => absint( $upload_id ),
+					'validation_status' => 'invalid',
+				),
+				'order_by' => 'row_index ASC',
+				'limit'    => $limit,
+			)
+		);
+	}
+
+	/**
+	 * Commit a dry-run upload into the live generation pool.
+	 *
+	 * @param int $upload_id Upload id.
+	 * @return array
+	 */
+	public static function commit_dry_run_upload( $upload_id ) {
+		$upload = AMC_DB::get_row( 'source_uploads', $upload_id );
+
+		if ( ! $upload ) {
+			return array(
+				'success' => false,
+				'message' => 'Dry-run upload could not be found.',
+			);
+		}
+
+		if ( empty( $upload['is_dry_run'] ) ) {
+			return array(
+				'success' => false,
+				'message' => 'This upload is already part of the active generation pool.',
+			);
+		}
+
+		AMC_DB::save_row(
+			'source_uploads',
+			array(
+				'is_dry_run' => 0,
+			),
+			$upload_id
+		);
+
+		self::log( $upload_id, 0, 'dry_run_commit', 'info', 'Dry-run upload committed into the active generation pool.', array() );
+
+		return array(
+			'success' => true,
+			'message' => 'Dry-run upload committed successfully.',
+		);
+	}
+
+	/**
 	 * Get scoring rules grouped for the admin UI.
 	 *
 	 * @return array
@@ -751,6 +1035,34 @@ class AMC_Ingestion {
 				);
 			} elseif ( 'methodology' === $rule['rule_group'] ) {
 				$out['methodology'][ self::humanize_rule_key( $rule['rule_key'] ) ] = $rule['rule_value'];
+			}
+		}
+
+		$expected_weights = array(
+			'spotify_weight'       => 'Spotify',
+			'youtube_music_weight' => 'YouTube Music',
+			'tiktok_weight'        => 'TikTok',
+			'shazam_weight'        => 'Shazam',
+			'apple_music_weight'   => 'Apple Music',
+			'anghami_weight'       => 'Anghami',
+		);
+
+		foreach ( $expected_weights as $key => $label ) {
+			$exists = false;
+			foreach ( $out['weights'] as $row ) {
+				if ( $row['key'] === $key ) {
+					$exists = true;
+					break;
+				}
+			}
+			if ( ! $exists ) {
+				$out['weights'][] = array(
+					'id'     => 0,
+					'source' => $label,
+					'key'    => $key,
+					'weight' => '',
+					'value'  => '',
+				);
 			}
 		}
 
@@ -1405,6 +1717,32 @@ class AMC_Ingestion {
 	}
 
 	/**
+	 * Get previous published chart week by chart/country/date.
+	 *
+	 * @param int    $chart_id Chart id.
+	 * @param string $country Country.
+	 * @param string $chart_date Date.
+	 * @return array|null
+	 */
+	private static function get_previous_published_week( $chart_id, $country, $chart_date ) {
+		global $wpdb;
+
+		$table = AMC_DB::table( 'chart_weeks' );
+		$row   = $wpdb->get_row(
+			$wpdb->prepare(
+				"SELECT * FROM {$table} WHERE chart_id = %d AND country = %s AND status = %s AND week_date < %s ORDER BY week_date DESC, id DESC LIMIT 1",
+				absint( $chart_id ),
+				$country,
+				'published',
+				$chart_date
+			),
+			ARRAY_A
+		); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+
+		return $row ? $row : null;
+	}
+
+	/**
 	 * Sync upload status from row matching state.
 	 *
 	 * @param int $upload_id Upload id.
@@ -1443,6 +1781,51 @@ class AMC_Ingestion {
 		}
 
 		AMC_DB::save_row( 'source_uploads', array( 'file_status' => $status ), $upload_id );
+	}
+
+	/**
+	 * Refresh upload diagnostics summary.
+	 *
+	 * @param int $upload_id Upload id.
+	 * @return void
+	 */
+	private static function refresh_upload_diagnostics( $upload_id ) {
+		$rows         = AMC_DB::get_rows( 'source_rows', array( 'where' => array( 'upload_id' => absint( $upload_id ) ) ) );
+		$summary      = array(
+			'row_count'         => count( $rows ),
+			'valid_rows'        => 0,
+			'invalid_rows'      => 0,
+			'matched_rows'      => 0,
+			'review_needed'     => 0,
+			'rejected_rows'     => 0,
+			'pending_rows'      => 0,
+		);
+
+		foreach ( $rows as $row ) {
+			if ( 'invalid' === $row['validation_status'] ) {
+				++$summary['invalid_rows'];
+			} else {
+				++$summary['valid_rows'];
+			}
+
+			if ( 'matched' === $row['matching_status'] ) {
+				++$summary['matched_rows'];
+			} elseif ( 'review_needed' === $row['matching_status'] ) {
+				++$summary['review_needed'];
+			} elseif ( 'rejected' === $row['matching_status'] || 'invalid' === $row['matching_status'] ) {
+				++$summary['rejected_rows'];
+			} else {
+				++$summary['pending_rows'];
+			}
+		}
+
+		AMC_DB::save_row(
+			'source_uploads',
+			array(
+				'diagnostic_summary' => wp_json_encode( $summary ),
+			),
+			$upload_id
+		);
 	}
 
 	/**

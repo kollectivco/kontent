@@ -32,7 +32,7 @@ include AMC_PLUGIN_DIR . 'templates/parts/site-header.php';
 					<div class="amc-stat-row">
 						<div><strong><?php echo esc_html( $artist['monthly'] ); ?></strong><span>Monthly Listeners</span></div>
 						<div><strong><?php echo esc_html( $artist['streak'] ); ?></strong><span>Chart Streak</span></div>
-						<div><strong><?php echo esc_html( count( $tracks ) ); ?></strong><span>Seeded Tracks</span></div>
+						<div><strong><?php echo esc_html( count( $tracks ) ); ?></strong><span>Linked Tracks</span></div>
 						<div><strong><?php echo esc_html( count( $artist_positions ) ); ?></strong><span>Chart Appearances</span></div>
 					</div>
 				</div>
@@ -55,12 +55,12 @@ include AMC_PLUGIN_DIR . 'templates/parts/site-header.php';
 					<div class="amc-summary-card">
 						<span class="amc-section-label">Audience</span>
 						<strong><?php echo esc_html( $artist['monthly'] ); ?></strong>
-						<p>Seeded scale metric used to deepen the profile without adding real analytics yet.</p>
+						<p>Audience scale metric when available on the linked artist profile.</p>
 					</div>
 					<div class="amc-summary-card">
 						<span class="amc-section-label">Charts</span>
 						<strong><?php echo esc_html( count( $artist_positions ) ); ?> active</strong>
-						<p>Current seeded chart presence across artist-focused lists.</p>
+						<p>Current live chart presence across artist-focused lists.</p>
 					</div>
 				</div>
 			</div>
@@ -85,7 +85,7 @@ include AMC_PLUGIN_DIR . 'templates/parts/site-header.php';
 							</div>
 						<?php endforeach; ?>
 					<?php else : ?>
-						<p>No tracks are currently attached to this artist in the demo dataset.</p>
+						<p>No tracks are currently attached to this artist yet.</p>
 					<?php endif; ?>
 				</div>
 
@@ -106,7 +106,7 @@ include AMC_PLUGIN_DIR . 'templates/parts/site-header.php';
 							</div>
 						<?php endforeach; ?>
 					<?php else : ?>
-						<p>This artist does not have seeded chart placements yet.</p>
+						<p>This artist does not have live chart placements yet.</p>
 					<?php endif; ?>
 				</div>
 			</div>

@@ -3,6 +3,7 @@ document.addEventListener('DOMContentLoaded', function () {
 	const rootNodes = document.querySelectorAll('.amc-admin-shell, .amc-custom-dashboard');
 	const toggles = document.querySelectorAll('[data-amc-theme-toggle]');
 	const buttons = document.querySelectorAll('.amc-admin-button-row .button');
+	const links = document.querySelectorAll('a[href*="amc_confirm="]');
 
 	function getStoredTheme() {
 		const stored = window.localStorage.getItem(THEME_KEY);
@@ -41,6 +42,21 @@ document.addEventListener('DOMContentLoaded', function () {
 	buttons.forEach(function (button) {
 		button.addEventListener('click', function () {
 			button.blur();
+		});
+	});
+
+	links.forEach(function (link) {
+		link.addEventListener('click', function (event) {
+			try {
+				const url = new URL(link.href);
+				const message = url.searchParams.get('amc_confirm');
+
+				if (message && !window.confirm(message)) {
+					event.preventDefault();
+				}
+			} catch (error) {
+				/* noop */
+			}
 		});
 	});
 });
