@@ -55,7 +55,7 @@ class AMC_Routing {
 
 		switch ( $route ) {
 			case 'home':
-				return array( 'title' => 'Arabic Music Charts' );
+				return array( 'title' => 'Kontentainment Charts' );
 			case 'charts':
 				return array( 'title' => 'Charts Index' );
 			case 'chart':

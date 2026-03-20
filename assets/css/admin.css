@@ -1,0 +1,317 @@
+.amc-admin-wrap {
+	margin: 20px 20px 0 2px;
+}
+
+.amc-admin-shell {
+	--amc-admin-bg: #0f1219;
+	--amc-admin-panel: #171b24;
+	--amc-admin-panel-2: #11151d;
+	--amc-admin-line: rgba(255, 255, 255, 0.08);
+	--amc-admin-text: #f4efe6;
+	--amc-admin-muted: #a39c90;
+	--amc-admin-gold: #e8c26f;
+	--amc-admin-blue: #6eb3ff;
+	--amc-admin-green: #4ddd8a;
+	--amc-admin-violet: #ad8cff;
+	--amc-admin-shadow: 0 24px 60px rgba(0, 0, 0, 0.24);
+	color: var(--amc-admin-text);
+}
+
+.amc-admin-topbar,
+.amc-admin-panel,
+.amc-admin-card,
+.amc-admin-tabs,
+.amc-admin-alert,
+.amc-admin-table-wrap {
+	border: 1px solid var(--amc-admin-line);
+	border-radius: 22px;
+	background: linear-gradient(180deg, var(--amc-admin-panel), var(--amc-admin-panel-2));
+	box-shadow: var(--amc-admin-shadow);
+}
+
+.amc-admin-topbar {
+	display: flex;
+	justify-content: space-between;
+	gap: 20px;
+	padding: 28px 30px;
+	margin-bottom: 18px;
+}
+
+.amc-admin-kicker {
+	margin: 0 0 10px;
+	color: var(--amc-admin-gold);
+	font-size: 12px;
+	font-weight: 700;
+	letter-spacing: 0.18em;
+	text-transform: uppercase;
+}
+
+.amc-admin-topbar h1 {
+	margin: 0 0 10px;
+	color: var(--amc-admin-text);
+	font-size: 36px;
+	line-height: 1;
+}
+
+.amc-admin-subcopy {
+	max-width: 74ch;
+	margin: 0;
+	color: var(--amc-admin-muted);
+	font-size: 14px;
+}
+
+.amc-admin-topbar__actions {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: start;
+	gap: 10px;
+}
+
+.amc-admin-tabs {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 10px;
+	padding: 12px;
+	margin-bottom: 18px;
+}
+
+.amc-admin-tabs a {
+	padding: 10px 14px;
+	border-radius: 999px;
+	color: var(--amc-admin-muted);
+	text-decoration: none;
+	font-weight: 600;
+}
+
+.amc-admin-tabs a:hover,
+.amc-admin-tabs a.is-active {
+	background: rgba(255, 255, 255, 0.08);
+	color: var(--amc-admin-text);
+}
+
+.amc-admin-content {
+	display: grid;
+	gap: 18px;
+}
+
+.amc-admin-grid {
+	display: grid;
+	gap: 18px;
+}
+
+.amc-admin-grid--cards {
+	grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.amc-admin-grid--split {
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.amc-admin-card {
+	padding: 20px;
+}
+
+.amc-admin-card span {
+	display: block;
+	margin-bottom: 10px;
+	color: var(--amc-admin-muted);
+	font-size: 12px;
+	font-weight: 700;
+	letter-spacing: 0.14em;
+	text-transform: uppercase;
+}
+
+.amc-admin-card strong {
+	display: block;
+	margin-bottom: 8px;
+	font-size: 32px;
+	line-height: 1;
+	color: var(--amc-admin-text);
+}
+
+.amc-admin-card p {
+	margin: 0;
+	color: var(--amc-admin-muted);
+}
+
+.amc-admin-card--gold strong { color: var(--amc-admin-gold); }
+.amc-admin-card--blue strong { color: var(--amc-admin-blue); }
+.amc-admin-card--emerald strong { color: var(--amc-admin-green); }
+.amc-admin-card--violet strong { color: var(--amc-admin-violet); }
+
+.amc-admin-panel {
+	padding: 24px;
+}
+
+.amc-admin-panel header {
+	margin-bottom: 18px;
+}
+
+.amc-admin-panel h2 {
+	margin: 0 0 8px;
+	color: var(--amc-admin-text);
+	font-size: 22px;
+	line-height: 1.1;
+}
+
+.amc-admin-panel header p,
+.amc-admin-panel > p {
+	margin: 0;
+	color: var(--amc-admin-muted);
+}
+
+.amc-admin-table-wrap {
+	overflow: hidden;
+}
+
+.amc-admin-table {
+	margin: 0;
+	border: 0;
+	background: transparent;
+}
+
+.amc-admin-table thead th {
+	padding: 14px 16px;
+	border-bottom: 1px solid var(--amc-admin-line);
+	background: rgba(255, 255, 255, 0.03);
+	color: var(--amc-admin-muted);
+	font-size: 12px;
+	font-weight: 700;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+}
+
+.amc-admin-table tbody td {
+	padding: 16px;
+	border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+	background: transparent;
+	color: var(--amc-admin-text);
+}
+
+.amc-admin-table tbody tr:last-child td {
+	border-bottom: 0;
+}
+
+.amc-admin-table.striped > tbody > :nth-child(odd),
+.amc-admin-table.striped > tbody > :nth-child(odd) td {
+	background: rgba(255, 255, 255, 0.015);
+}
+
+.amc-admin-form {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 14px;
+}
+
+.amc-admin-form label {
+	display: grid;
+	gap: 8px;
+}
+
+.amc-admin-form span {
+	color: var(--amc-admin-muted);
+	font-size: 12px;
+	font-weight: 700;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+}
+
+.amc-admin-form input {
+	min-height: 44px;
+	padding: 10px 12px;
+	border: 1px solid var(--amc-admin-line);
+	border-radius: 12px;
+	background: rgba(255, 255, 255, 0.03);
+	color: var(--amc-admin-text);
+}
+
+.amc-admin-button-row {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 10px;
+	margin-top: 18px;
+}
+
+.amc-admin-alerts {
+	display: grid;
+	gap: 12px;
+}
+
+.amc-admin-alert {
+	padding: 16px 18px;
+}
+
+.amc-admin-alert strong {
+	display: block;
+	margin-bottom: 6px;
+	font-size: 14px;
+}
+
+.amc-admin-alert p {
+	margin: 0;
+	color: var(--amc-admin-muted);
+}
+
+.amc-admin-alert--warning { border-color: rgba(232, 194, 111, 0.35); }
+.amc-admin-alert--danger { border-color: rgba(255, 106, 99, 0.35); }
+.amc-admin-alert--info { border-color: rgba(110, 179, 255, 0.35); }
+
+.amc-admin-stat-stack,
+.amc-admin-definition-list {
+	display: grid;
+	gap: 12px;
+}
+
+.amc-admin-stat-stack div,
+.amc-admin-definition-list div,
+.amc-admin-publish-week {
+	padding: 16px;
+	border: 1px solid var(--amc-admin-line);
+	border-radius: 16px;
+	background: rgba(255, 255, 255, 0.03);
+}
+
+.amc-admin-stat-stack strong,
+.amc-admin-definition-list strong,
+.amc-admin-publish-week strong {
+	display: block;
+	margin-bottom: 4px;
+	color: var(--amc-admin-text);
+	font-size: 22px;
+	line-height: 1.05;
+}
+
+.amc-admin-stat-stack span,
+.amc-admin-definition-list span,
+.amc-admin-publish-week span {
+	color: var(--amc-admin-muted);
+}
+
+@media (max-width: 1180px) {
+	.amc-admin-grid--cards,
+	.amc-admin-grid--split,
+	.amc-admin-form {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+	}
+
+	.amc-admin-topbar {
+		flex-direction: column;
+	}
+}
+
+@media (max-width: 782px) {
+	.amc-admin-grid--cards,
+	.amc-admin-grid--split,
+	.amc-admin-form {
+		grid-template-columns: 1fr;
+	}
+
+	.amc-admin-wrap {
+		margin-right: 10px;
+	}
+
+	.amc-admin-topbar,
+	.amc-admin-panel {
+		padding: 18px;
+	}
+}

@@ -11,7 +11,7 @@ $context        = AMC_Data::get_home_context();
 $hero_chart     = $context['hero_chart'];
 $featured       = $hero_chart['featured'];
 $chart          = $hero_chart;
-$amc_page_title = 'Arabic Music Charts';
+$amc_page_title = 'Kontentainment Charts';
 $amc_body_class = 'amc-home';
 
 include AMC_PLUGIN_DIR . 'templates/parts/document-start.php';
@@ -22,7 +22,7 @@ include AMC_PLUGIN_DIR . 'templates/parts/site-header.php';
 		<div class="amc-container amc-home-hero__inner">
 			<div class="amc-home-hero__copy">
 				<p class="amc-section-label">Week of <?php echo esc_html( wp_date( 'F j, Y' ) ); ?></p>
-				<h1>Premium Arabic charts with a bold editorial pulse.</h1>
+				<h1>Premium chart stories with a bold editorial pulse.</h1>
 				<p>Track the week’s most influential artists, songs, and albums through a cinematic dark interface built for chart storytelling.</p>
 				<div class="amc-home-hero__actions">
 					<a class="amc-button" href="<?php echo esc_url( AMC_Data::route_url( 'charts' ) ); ?>">Open Charts</a>

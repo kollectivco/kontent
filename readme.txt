@@ -1,17 +1,17 @@
-=== Arabic Music Charts Platform ===
+=== Kontentainment Charts ===
 Contributors: kollectivco
 Tags: music, charts, artists, tracks, albums
 Requires at least: 6.0
 Tested up to: 6.5
-Stable tag: 1.1.0
+Stable tag: 2.0.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
-Premium public-facing music charts experience for WordPress with plugin-based routing, seeded demo data, and a dark editorial interface.
+Premium public-facing music charts experience and control center for WordPress with plugin-based routing, seeded demo data, editorial frontend, and plugin-owned admin views.
 
 == Description ==
 
-Arabic Music Charts Platform is a Phase 1 public frontend plugin for chart-led music publishing experiences.
+Kontentainment Charts is a WordPress plugin for chart-led music publishing experiences with public chart pages and an internal admin control center UI.
 
 Features:
 
@@ -21,6 +21,7 @@ Features:
 * Track and artist detail routes
 * Seeded demo artists, tracks, albums, and chart entries
 * GitHub-based update flow for future plugin versions
+* Plugin-owned admin control center for charts, entries, uploads, scoring, publishing, and archives
 
 == Installation ==
 
@@ -29,6 +30,10 @@ Features:
 3. Visit Settings > Permalinks once or reactivate the plugin to refresh routes.
 
 == Changelog ==
+
+= 2.0.0 =
+* Added Phase 2 plugin-owned admin dashboard UI for Kontentainment Charts.
+* Renamed plugin and public brand references to Kontentainment Charts.
 
 = 1.1.0 =
 * Editorial frontend polish pass with richer chart summaries, deeper single pages, refined row styling, hover states, and improved mobile behavior.

@@ -20,9 +20,9 @@ $nav_items = array(
 <header class="amc-header">
 	<div class="amc-container amc-header__inner">
 		<a class="amc-brand" href="<?php echo esc_url( AMC_Data::route_url() ); ?>">
-			<span class="amc-brand__mark">AMC</span>
+			<span class="amc-brand__mark">KC</span>
 			<span class="amc-brand__text">
-				<strong>Arabic Music Charts</strong>
+				<strong>Kontentainment Charts</strong>
 				<small>Premium charts editorial</small>
 			</span>
 		</a>

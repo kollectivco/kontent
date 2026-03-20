@@ -36,7 +36,7 @@ class AMC_Data {
 				'title'       => 'Top Albums',
 				'type'        => 'album',
 				'kicker'      => 'Essential Full-Length Releases',
-				'description' => 'The albums shaping the week across Arabic pop, rap, indie, and crossover sounds.',
+				'description' => 'The albums shaping the week across pop, rap, indie, and crossover sounds.',
 				'accent'      => 'teal',
 			),
 			'hot-100-tracks'  => array(
@@ -70,7 +70,7 @@ class AMC_Data {
 			'nancy-ajram' => array(
 				'name'        => 'Nancy Ajram',
 				'country'     => 'Lebanon',
-				'genres'      => 'Arabic Pop, Dance Pop',
+				'genres'      => 'Regional Pop, Dance Pop',
 				'description' => 'A chart-dominating pop icon with polished hooks, cross-generational reach, and a sharp visual identity.',
 				'blurb'       => 'Nancy owns this week with a polished, high-gloss return powered by massive replay value.',
 				'monthly'     => '38.4M',
@@ -80,7 +80,7 @@ class AMC_Data {
 			'amr-diab' => array(
 				'name'        => 'Amr Diab',
 				'country'     => 'Egypt',
-				'genres'      => 'Mediterranean Pop, Arabic Pop',
+				'genres'      => 'Mediterranean Pop, Regional Pop',
 				'description' => 'Still setting the bar for mainstream longevity, Amr balances effortless cool with precision songwriting.',
 				'blurb'       => 'A legacy giant with renewed heat thanks to playlist strength and live demand.',
 				'monthly'     => '31.2M',
@@ -90,7 +90,7 @@ class AMC_Data {
 			'elissa' => array(
 				'name'        => 'Elissa',
 				'country'     => 'Lebanon',
-				'genres'      => 'Arabic Pop, Ballad',
+				'genres'      => 'Regional Pop, Ballad',
 				'description' => 'A commanding vocalist whose catalog keeps generating new traction around every emotional release.',
 				'blurb'       => 'Big emotional songwriting and loyal fan momentum keep Elissa climbing.',
 				'monthly'     => '24.8M',
@@ -101,7 +101,7 @@ class AMC_Data {
 				'name'        => 'Marwan Pablo',
 				'country'     => 'Egypt',
 				'genres'      => 'Trap, Alternative Rap',
-				'description' => 'A defining voice in Arabic rap with a dense, high-style sound and instant cultural gravity.',
+				'description' => 'A defining voice in regional rap with a dense, high-style sound and instant cultural gravity.',
 				'blurb'       => 'Pablo’s grip on the rap conversation remains intense, especially among younger listeners.',
 				'monthly'     => '18.1M',
 				'streak'      => '6 weeks inside top 10',
@@ -110,7 +110,7 @@ class AMC_Data {
 			'assala' => array(
 				'name'        => 'Assala',
 				'country'     => 'Syria',
-				'genres'      => 'Arabic Pop, Tarab',
+				'genres'      => 'Regional Pop, Tarab',
 				'description' => 'A powerhouse performer whose catalog thrives on big vocals and emotionally direct arrangements.',
 				'blurb'       => 'A vocal institution with broad family-audience appeal and a durable catalog.',
 				'monthly'     => '19.6M',
@@ -140,7 +140,7 @@ class AMC_Data {
 			'balqees' => array(
 				'name'        => 'Balqees',
 				'country'     => 'Yemen / UAE',
-				'genres'      => 'Khaleeji Pop, Arabic Pop',
+				'genres'      => 'Khaleeji Pop, Regional Pop',
 				'description' => 'Elegant pop craft, strong live presence, and a catalog built for glossy chart moments.',
 				'blurb'       => 'Balqees blends premium visuals with strong radio-friendly execution.',
 				'monthly'     => '11.6M',

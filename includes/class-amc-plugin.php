@@ -41,6 +41,7 @@ class AMC_Plugin {
 		add_filter( 'document_title_parts', array( $this, 'filter_document_title' ) );
 
 		AMC_Updater::boot();
+		AMC_Admin::boot();
 	}
 
 	/**

@@ -91,7 +91,7 @@ class AMC_Updater {
 			'tested'        => ! empty( $release['tested'] ) ? $release['tested'] : '',
 			'download_link' => ! empty( $release['package'] ) ? $release['package'] : '',
 			'sections'      => array(
-				'description' => '<p>Public-facing Arabic music charts plugin with plugin-based routes, seeded demo data, and a premium editorial frontend.</p>',
+				'description' => '<p>Kontentainment Charts is a chart publishing plugin with premium public pages and a plugin-owned control center.</p>',
 				'changelog'   => '<p>' . esc_html( ! empty( $release['body'] ) ? $release['body'] : 'See GitHub releases for change history.' ) . '</p>',
 			),
 		);
@@ -142,7 +142,7 @@ class AMC_Updater {
 
 		$headers = array(
 			'Accept'     => 'application/vnd.github+json',
-			'User-Agent' => 'Arabic-Music-Charts-Plugin',
+			'User-Agent' => 'Kontentainment-Charts-Plugin',
 		);
 
 		$response = wp_remote_get( 'https://api.github.com/repos/' . self::REPO . '/releases/latest', array( 'headers' => $headers, 'timeout' => 15 ) );
