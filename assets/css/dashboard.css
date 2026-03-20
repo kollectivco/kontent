@@ -1,6 +1,6 @@
 body.amc-dashboard-page {
 	background:
-		radial-gradient(circle at top left, rgba(232, 194, 111, 0.1), transparent 20%),
+		radial-gradient(circle at top left, rgba(232, 194, 111, 0.12), transparent 20%),
 		linear-gradient(180deg, #0a0d13 0%, #07090d 100%);
 }
 
@@ -17,9 +17,11 @@ body.amc-dashboard-page {
 
 .amc-custom-dashboard__sidebar,
 .amc-custom-dashboard__main {
-	border: 1px solid rgba(255, 255, 255, 0.08);
+	border: 1px solid rgba(255, 255, 255, 0.12);
 	border-radius: 28px;
-	background: linear-gradient(180deg, rgba(18, 20, 28, 0.96), rgba(10, 12, 17, 0.98));
+	background:
+		linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent 28%),
+		linear-gradient(180deg, rgba(24, 28, 37, 0.98), rgba(14, 17, 24, 0.99));
 	box-shadow: 0 30px 80px rgba(0, 0, 0, 0.38);
 }
 
@@ -35,7 +37,7 @@ body.amc-dashboard-page {
 	align-items: center;
 	gap: 14px;
 	padding: 6px 4px 18px;
-	border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+	border-bottom: 1px solid rgba(255, 255, 255, 0.12);
 }
 
 .amc-custom-dashboard__brand span {
@@ -59,7 +61,7 @@ body.amc-dashboard-page {
 }
 
 .amc-custom-dashboard__brand small {
-	color: #a39c90;
+	color: #d0c6b8;
 	font-size: 12px;
 }
 
@@ -72,22 +74,25 @@ body.amc-dashboard-page {
 .amc-custom-dashboard__utility {
 	padding: 12px 14px;
 	border-radius: 14px;
-	color: #b6aea2;
+	color: #e4ddcf;
 	text-decoration: none;
 	font-weight: 600;
+	border: 1px solid transparent;
+	background: rgba(255, 255, 255, 0.025);
 }
 
 .amc-custom-dashboard__nav a:hover,
 .amc-custom-dashboard__nav a.is-active,
 .amc-custom-dashboard__utility:hover {
-	background: rgba(255, 255, 255, 0.07);
-	color: #f4efe6;
+	background: rgba(255, 255, 255, 0.1);
+	border-color: rgba(255, 255, 255, 0.12);
+	color: #fffdf8;
 }
 
 .amc-custom-dashboard__sidebar-footer {
 	margin-top: auto;
 	padding-top: 16px;
-	border-top: 1px solid rgba(255, 255, 255, 0.08);
+	border-top: 1px solid rgba(255, 255, 255, 0.12);
 }
 
 .amc-custom-dashboard__main {
