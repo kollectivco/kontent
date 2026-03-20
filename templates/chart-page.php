@@ -9,6 +9,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 $chart_slug      = get_query_var( 'amc_chart' );
 $chart           = AMC_Data::get_chart( $chart_slug );
+$chart_state     = AMC_Data::chart_public_state( $chart_slug );
 $amc_page_title  = $chart ? $chart['title'] : 'Chart';
 $amc_body_class  = 'amc-chart-page';
 $summary         = $chart && ! empty( $chart['summary'] ) ? $chart['summary'] : array();
@@ -25,7 +26,7 @@ include AMC_PLUGIN_DIR . 'templates/parts/site-header.php';
 				<p><?php echo esc_html( $chart['description'] ); ?></p>
 				<div class="amc-hero-note">
 					<strong>Editor’s note</strong>
-					<span>This list is built to feel like a weekly cover story, with movement, longevity, and visual hierarchy taking priority.</span>
+					<span><?php echo esc_html( ! empty( $chart['entries'] ) ? 'This list is built to feel like a weekly cover story, with movement, longevity, and visual hierarchy taking priority.' : 'This chart route is live and branded, but it will stay empty until the first published week for this chart and country is pushed live.' ); ?></span>
 				</div>
 			</div>
 		</section>
@@ -63,8 +64,8 @@ include AMC_PLUGIN_DIR . 'templates/parts/site-header.php';
 				<section class="amc-featured amc-featured--<?php echo esc_attr( $chart['accent'] ); ?>">
 					<div class="amc-featured__content">
 						<p class="amc-section-label">No published week yet</p>
-						<h2>This chart is ready for real data.</h2>
-						<p>Publish a chart week for this category to populate rankings, movement, and detail links on the public page.</p>
+						<h2><?php echo esc_html( $chart_state['has_live_week'] ? 'This chart is receiving live data.' : 'This chart is waiting for its first live week.' ); ?></h2>
+						<p>Publish a chart week for this category to populate rankings, movement, detail links, and homepage placements with real data.</p>
 					</div>
 				</section>
 			<?php endif; ?>
@@ -75,7 +76,7 @@ include AMC_PLUGIN_DIR . 'templates/parts/site-header.php';
 						<p class="amc-section-label">Chart Brief</p>
 						<h2>What defines this week’s mood</h2>
 					</div>
-					<p>The upper tier leans heavily on familiar names with enough movement underneath to keep the table feeling alive. This pass sharpens the sense of momentum by treating every ranking row as a story beat instead of plain metadata.</p>
+					<p><?php echo esc_html( ! empty( $chart['entries'] ) ? 'The upper tier leans heavily on familiar names with enough movement underneath to keep the table feeling alive. This pass sharpens the sense of momentum by treating every ranking row as a story beat instead of plain metadata.' : 'The editorial shell is already in place. Once the first live week is published, this chart brief will shift from setup state to weekly chart storytelling.' ); ?></p>
 				</div>
 			</section>
 

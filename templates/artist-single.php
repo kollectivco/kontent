@@ -13,6 +13,7 @@ $amc_page_title  = $artist ? $artist['name'] : 'Artist';
 $amc_body_class  = 'amc-artist-page';
 $artist_positions= $artist ? AMC_Data::get_artist_chart_positions( $artist['id'] ) : array();
 $peer_artists    = $artist ? AMC_Data::get_related_artists( $artist['id'], 4 ) : array();
+$public_state    = AMC_Data::public_state();
 
 include AMC_PLUGIN_DIR . 'templates/parts/document-start.php';
 include AMC_PLUGIN_DIR . 'templates/parts/site-header.php';
@@ -119,8 +120,8 @@ include AMC_PLUGIN_DIR . 'templates/parts/site-header.php';
 						<p class="amc-section-label">Editorial Snapshot</p>
 						<h2>Profile notes</h2>
 					</div>
-					<p>This artist page now reads closer to a chart-profile spread: identity, stats, active songs, and chart context all support the primary visual hierarchy.</p>
-					<p>The goal of Phase 1.1 is to make the public plugin feel like a media product before any scoring engine or admin tooling arrives in later phases.</p>
+					<p><?php echo esc_html( $public_state['has_published_data'] ? 'This artist page now reads closer to a chart-profile spread: identity, stats, active songs, and chart context all support the primary visual hierarchy.' : 'This artist route is live and ready for production use, but chart-context blocks will stay empty until the first published artist-linked week exists.' ); ?></p>
+					<p><?php echo esc_html( $public_state['has_published_data'] ? 'The goal is to keep the public plugin feeling like a media product while the backend pipeline stays operationally grounded.' : 'Once real uploads move through parsing, matching, generation, and publishing, this profile will automatically switch from setup state to live editorial context.' ); ?></p>
 				</div>
 
 				<div class="amc-panel">

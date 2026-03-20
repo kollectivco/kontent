@@ -60,6 +60,7 @@ class AMC_Data {
 		return apply_filters( 'amc_chart_definitions', $charts );
 	}
 
+	/**
 	 * Build page url.
 	 *
 	 * @param string $path Route path after base.
@@ -70,6 +71,45 @@ class AMC_Data {
 		$base = home_url( trailingslashit( AMC_ROUTE_BASE ) );
 
 		return $path ? trailingslashit( $base . $path ) : $base;
+	}
+
+	/**
+	 * Public live-data state.
+	 *
+	 * @return array
+	 */
+	public static function public_state() {
+		$active_charts   = AMC_DB::count_rows( 'charts', array( 'status' => 'active' ) );
+		$published_weeks = AMC_DB::count_rows( 'chart_weeks', array( 'status' => 'published' ) );
+
+		return array(
+			'has_charts'         => $active_charts > 0,
+			'has_published_data' => $published_weeks > 0,
+			'active_chart_count' => $active_charts,
+			'live_week_count'    => $published_weeks,
+		);
+	}
+
+	/**
+	 * Chart-specific live state.
+	 *
+	 * @param string $chart_slug Chart slug.
+	 * @return array
+	 */
+	public static function chart_public_state( $chart_slug ) {
+		$chart = AMC_DB::get_row_by_slug( 'charts', $chart_slug );
+
+		if ( ! $chart ) {
+			return array(
+				'exists'       => false,
+				'has_live_week'=> false,
+			);
+		}
+
+		return array(
+			'exists'        => true,
+			'has_live_week' => (bool) AMC_DB::get_current_published_week( (int) $chart['id'] ),
+		);
 	}
 
 	/**

@@ -103,6 +103,324 @@ class AMC_Admin_Data {
 	}
 
 	/**
+	 * Production onboarding and readiness state.
+	 *
+	 * @return array
+	 */
+	public static function onboarding_status() {
+		$charts_count     = AMC_DB::count_rows( 'charts', array( 'status' => 'active' ) );
+		$uploads          = AMC_DB::get_rows( 'source_uploads', array( 'order_by' => 'id DESC' ) );
+		$matching_queue   = AMC_DB::get_rows( 'matching_queue', array( 'order_by' => 'id DESC' ) );
+		$weeks            = AMC_DB::get_chart_weeks();
+		$scoring_rules    = AMC_Ingestion::get_scoring_rules();
+		$published_weeks  = array();
+		$draft_ready      = 0;
+		$generated_weeks  = 0;
+		$parsed_completed = false;
+		$matched_done     = false;
+		$first_upload     = ! empty( $uploads );
+		$first_parsed     = false;
+
+		foreach ( $uploads as $upload ) {
+			if ( in_array( $upload['file_status'], array( 'parsed', 'matched', 'generated', 'published' ), true ) ) {
+				$parsed_completed = true;
+				$first_parsed     = true;
+			}
+
+			if ( in_array( $upload['file_status'], array( 'matched', 'generated', 'published' ), true ) ) {
+				$matched_done = true;
+			}
+		}
+
+		foreach ( $matching_queue as $item ) {
+			if ( in_array( $item['status'], array( 'approved', 'rejected', 'overridden' ), true ) ) {
+				$matched_done = true;
+				break;
+			}
+		}
+
+		foreach ( $weeks as $week ) {
+			$entries = AMC_DB::get_chart_entries( (int) $week['id'] );
+
+			if ( ! empty( $entries ) ) {
+				++$generated_weeks;
+			}
+
+			if ( 'draft' === $week['status'] && ! empty( $entries ) ) {
+				++$draft_ready;
+			}
+
+			if ( 'published' === $week['status'] ) {
+				$published_weeks[] = $week;
+			}
+		}
+
+		$has_scoring = false;
+
+		if ( ! empty( $scoring_rules['weights'] ) ) {
+			foreach ( $scoring_rules['weights'] as $rule ) {
+				if ( '' !== (string) $rule['value'] ) {
+					$has_scoring = true;
+					break;
+				}
+			}
+		}
+
+		if ( ! $has_scoring && ! empty( $scoring_rules['methodology'] ) ) {
+			foreach ( $scoring_rules['methodology'] as $value ) {
+				if ( '' !== trim( (string) $value ) ) {
+					$has_scoring = true;
+					break;
+				}
+			}
+		}
+
+		$steps = array(
+			array(
+				'key'         => 'charts_created',
+				'label'       => 'Create first chart',
+				'description' => 'Set up at least one real chart category before the ingestion flow starts.',
+				'complete'    => $charts_count > 0,
+				'url'         => AMC_Admin_Data::custom_dashboard_url( 'charts' ),
+				'action'      => 'Open Charts',
+			),
+			array(
+				'key'         => 'scoring_configured',
+				'label'       => 'Configure scoring rules',
+				'description' => 'Save real source weights and methodology values for generation.',
+				'complete'    => $has_scoring,
+				'url'         => AMC_Admin_Data::custom_dashboard_url( 'scoring' ),
+				'action'      => 'Open Scoring',
+			),
+			array(
+				'key'         => 'first_upload_completed',
+				'label'       => 'Upload first source file',
+				'description' => 'Start the operational flow by uploading a real source sheet with chart metadata.',
+				'complete'    => $first_upload,
+				'url'         => AMC_Admin_Data::custom_dashboard_url( 'uploads' ),
+				'action'      => 'Open Uploads',
+			),
+			array(
+				'key'         => 'first_parsing_completed',
+				'label'       => 'Review parsing',
+				'description' => 'Confirm the parser accepts the file structure and normalizes rows cleanly.',
+				'complete'    => $first_parsed,
+				'url'         => AMC_Admin_Data::custom_dashboard_url( 'uploads' ),
+				'action'      => 'Review Preview',
+			),
+			array(
+				'key'         => 'first_matching_review_completed',
+				'label'       => 'Review matching',
+				'description' => 'Resolve review-needed entities before generating a live-ready draft week.',
+				'complete'    => $matched_done,
+				'url'         => AMC_Admin_Data::custom_dashboard_url( 'cleaning' ),
+				'action'      => 'Open Matching',
+			),
+			array(
+				'key'         => 'first_chart_generated',
+				'label'       => 'Generate first chart week',
+				'description' => 'Build a draft chart week from approved upload rows and scoring rules.',
+				'complete'    => $generated_weeks > 0,
+				'url'         => AMC_Admin_Data::custom_dashboard_url( 'weekly-entries' ),
+				'action'      => 'Open Weekly Entries',
+			),
+			array(
+				'key'         => 'first_chart_published',
+				'label'       => 'Publish first live chart',
+				'description' => 'Push the first approved chart week live so the public site starts serving real data.',
+				'complete'    => ! empty( $published_weeks ),
+				'url'         => AMC_Admin_Data::custom_dashboard_url( 'publishing' ),
+				'action'      => 'Open Publishing',
+			),
+		);
+
+		$completed = count(
+			array_filter(
+				$steps,
+				function ( $step ) {
+					return ! empty( $step['complete'] );
+				}
+			)
+		);
+
+		return array(
+			'is_ready'             => $completed === count( $steps ),
+			'completed_steps'      => $completed,
+			'total_steps'          => count( $steps ),
+			'steps'                => $steps,
+			'charts_count'         => $charts_count,
+			'first_upload'         => $first_upload,
+			'parsed_completed'     => $parsed_completed,
+			'matching_completed'   => $matched_done,
+			'generated_weeks'      => $generated_weeks,
+			'draft_ready'          => $draft_ready,
+			'published_weeks'      => count( $published_weeks ),
+			'has_scoring'          => $has_scoring,
+		);
+	}
+
+	/**
+	 * Operational summary for live dashboard use.
+	 *
+	 * @return array
+	 */
+	public static function operational_summary() {
+		$uploads            = self::uploads();
+		$matching_candidates= self::matching_candidates();
+		$weeks              = AMC_DB::get_chart_weeks();
+		$ready_to_generate  = 0;
+		$draft_ready        = 0;
+		$live_weeks         = array();
+
+		foreach ( $uploads as $upload ) {
+			if ( in_array( $upload['raw_status'], array( 'matched', 'generated', 'published' ), true ) && empty( $upload['is_dry_run'] ) ) {
+				++$ready_to_generate;
+			}
+		}
+
+		foreach ( $weeks as $week ) {
+			$chart = AMC_DB::get_row( 'charts', (int) $week['chart_id'] );
+			$entry_count = count( AMC_DB::get_chart_entries( (int) $week['id'] ) );
+
+			if ( 'draft' === $week['status'] && $entry_count > 0 ) {
+				++$draft_ready;
+			}
+
+			if ( 'published' === $week['status'] ) {
+				$live_weeks[] = array(
+					'chart'   => $chart ? $chart['name'] : 'Unknown chart',
+					'country' => ! empty( $week['country'] ) ? $week['country'] : 'Global',
+					'week'    => $week['week_date'],
+				);
+			}
+		}
+
+		$pending_review = count(
+			array_filter(
+				$matching_candidates,
+				function ( $row ) {
+					return in_array( $row['raw_status'], array( 'pending', 'review_needed' ), true );
+				}
+			)
+		);
+
+		return array(
+			'latest_uploads'      => array_slice( $uploads, 0, 5 ),
+			'pending_review'      => $pending_review,
+			'charts_ready'        => $ready_to_generate,
+			'draft_ready'         => $draft_ready,
+			'live_weeks'          => array_slice( $live_weeks, 0, 6 ),
+		);
+	}
+
+	/**
+	 * Upload guidance copy.
+	 *
+	 * @return array
+	 */
+	public static function upload_guidance() {
+		return array(
+			array(
+				'title' => 'YouTube Top Artists',
+				'copy'  => 'Choose artist chart type, select the target chart manually, then upload a file containing artist or channel name, rank, and optional growth or views columns.',
+			),
+			array(
+				'title' => 'YouTube Top Songs',
+				'copy'  => 'Use the track chart type with title, artist, rank, and views or plays columns. Include the exact week/date and country before upload.',
+			),
+			array(
+				'title' => 'Spotify Weekly',
+				'copy'  => 'Use the real target chart, set the country manually, and upload weekly CSV data with title, artist, streams or plays, and optional previous rank fields. The column named "source" is ignored automatically.',
+			),
+			array(
+				'title' => 'Shazam Chart',
+				'copy'  => 'Use track chart type and provide title, artist, rank, and chart metric columns. Confirm the chart week/date before processing.',
+			),
+		);
+	}
+
+	/**
+	 * First-publish review summary.
+	 *
+	 * @param int $week_id Optional week id.
+	 * @return array
+	 */
+	public static function first_publish_summary( $week_id = 0 ) {
+		$week = $week_id ? AMC_DB::get_row( 'chart_weeks', $week_id ) : null;
+
+		if ( ! $week ) {
+			$weeks = AMC_DB::get_chart_weeks();
+			$week  = ! empty( $weeks[0] ) ? $weeks[0] : null;
+		}
+
+		if ( ! $week ) {
+			return array(
+				'available' => false,
+				'safety'    => array(),
+				'summary'   => array(),
+			);
+		}
+
+		$chart           = AMC_DB::get_row( 'charts', (int) $week['chart_id'] );
+		$entries         = AMC_DB::get_chart_entries( (int) $week['id'] );
+		$uploads         = self::uploads();
+		$related_uploads = array_filter(
+			$uploads,
+			function ( $upload ) use ( $week ) {
+				return (int) $upload['target_chart_id'] === (int) $week['chart_id']
+					&& (string) $upload['country'] === (string) $week['country']
+					&& (string) $upload['chart_date'] === (string) $week['week_date'];
+			}
+		);
+		$valid_rows      = 0;
+		$matched_rows    = 0;
+		$rejected_rows   = 0;
+		$review_rows     = 0;
+
+		foreach ( $related_uploads as $upload ) {
+			$diag = ! empty( $upload['diagnostic_summary'] ) && is_array( $upload['diagnostic_summary'] ) ? $upload['diagnostic_summary'] : array();
+			$valid_rows   += ! empty( $diag['valid_rows'] ) ? (int) $diag['valid_rows'] : 0;
+			$matched_rows += ! empty( $diag['matched_rows'] ) ? (int) $diag['matched_rows'] : 0;
+			$rejected_rows+= ! empty( $diag['rejected_rows'] ) ? (int) $diag['rejected_rows'] : 0;
+			$review_rows  += ! empty( $diag['review_needed_rows'] ) ? (int) $diag['review_needed_rows'] : 0;
+		}
+
+		$safety = array(
+			array(
+				'label' => 'Has generated entries',
+				'state' => ! empty( $entries ),
+				'copy'  => ! empty( $entries ) ? 'This week contains generated ranking rows.' : 'Generate this chart week before publishing.',
+			),
+			array(
+				'label' => 'Matching review queue',
+				'state' => 0 === $review_rows,
+				'copy'  => 0 === $review_rows ? 'No review-needed rows remain for this chart week.' : $review_rows . ' rows still need manual review.',
+			),
+			array(
+				'label' => 'Live conflict check',
+				'state' => 'published' !== $week['status'],
+				'copy'  => 'published' !== $week['status'] ? 'This week is not already marked live.' : 'This week is already published.',
+			),
+		);
+
+		return array(
+			'available' => true,
+			'summary'   => array(
+				'Chart'                => $chart ? $chart['name'] : 'Unknown chart',
+				'Country'              => ! empty( $week['country'] ) ? $week['country'] : 'Global',
+				'Week / date'          => $week['week_date'],
+				'Valid rows'           => $valid_rows,
+				'Matched entities'     => $matched_rows,
+				'Rejected rows'        => $rejected_rows,
+				'Review-needed rows'   => $review_rows,
+				'Generated entries'    => count( $entries ),
+				'Generation summary'   => ! empty( $week['comparison_summary'] ) ? $week['comparison_summary'] : 'Draft week generated and ready for final review.',
+			),
+			'safety'    => $safety,
+		);
+	}
+
+	/**
 	 * Recent uploads.
 	 *
 	 * @return array

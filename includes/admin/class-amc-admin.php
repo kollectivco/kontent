@@ -299,7 +299,6 @@ class AMC_Admin {
 	private static function render_wp_admin_overview() {
 		$overview = AMC_Admin_Data::overview_cards();
 		$alerts   = AMC_Admin_Data::alerts();
-
 		echo '<section class="amc-admin-grid amc-admin-grid--cards">';
 		foreach ( $overview as $card ) {
 			printf(
@@ -311,6 +310,12 @@ class AMC_Admin {
 			);
 		}
 		echo '</section>';
+
+		self::render_setup_panel(
+			true,
+			'Production setup checklist',
+			'This lightweight overview tracks first-run readiness while the full operational workflow continues inside /charts-dashboard.'
+		);
 
 		echo '<section class="amc-admin-grid amc-admin-grid--split">';
 		self::render_panel_start( 'Control layer shortcuts', 'Jump directly to the main dashboard workspace for operational sections.' );
@@ -622,6 +627,7 @@ class AMC_Admin {
 		$uploads  = AMC_Admin_Data::recent_uploads();
 		$alerts   = AMC_Admin_Data::alerts();
 		$weeks    = AMC_Admin_Data::chart_week_status();
+		$ops      = AMC_Admin_Data::operational_summary();
 
 		echo '<section class="amc-admin-grid amc-admin-grid--cards">';
 		foreach ( $overview as $card ) {
@@ -634,6 +640,12 @@ class AMC_Admin {
 			);
 		}
 		echo '</section>';
+
+		self::render_setup_panel(
+			false,
+			'First live data workflow',
+			'Use this checklist to move from a clean production install to the first published chart week without demo content or hidden assumptions.'
+		);
 
 		echo '<section class="amc-admin-grid amc-admin-grid--split">';
 		self::render_panel_start( 'Recent uploads', 'Latest source sheets moving through the chart pipeline.' );
@@ -733,6 +745,24 @@ class AMC_Admin {
 		);
 		self::render_panel_end();
 		echo '</section>';
+
+		self::render_panel_start( 'Live operations snapshot', 'Real-time operational summary across uploads, review queues, generation readiness, and currently live chart weeks.' );
+		echo '<div class="amc-admin-stat-stack">';
+		printf( '<div><strong>%1$s</strong><span>Pending review items</span></div>', esc_html( (string) $ops['pending_review'] ) );
+		printf( '<div><strong>%1$s</strong><span>Uploads ready to generate</span></div>', esc_html( (string) $ops['charts_ready'] ) );
+		printf( '<div><strong>%1$s</strong><span>Draft weeks ready to publish</span></div>', esc_html( (string) $ops['draft_ready'] ) );
+		printf( '<div><strong>%1$s</strong><span>Currently live weeks</span></div>', esc_html( (string) count( $ops['live_weeks'] ) ) );
+		echo '</div>';
+		if ( ! empty( $ops['live_weeks'] ) ) {
+			echo '<div class="amc-admin-definition-list">';
+			foreach ( $ops['live_weeks'] as $item ) {
+				printf( '<div><strong>%1$s</strong><span>%2$s / Week of %3$s</span></div>', esc_html( $item['chart'] ), esc_html( $item['country'] ), esc_html( $item['week'] ) );
+			}
+			echo '</div>';
+		} else {
+			echo '<p>No chart week is live yet. Complete the first-run workflow to publish the first public chart.</p>';
+		}
+		self::render_panel_end();
 	}
 
 	private static function render_weekly_entries() {
@@ -778,6 +808,14 @@ class AMC_Admin {
 
 		$selected_chart = ! empty( $week['chart_id'] ) ? AMC_DB::get_row( 'charts', (int) $week['chart_id'] ) : null;
 		$entity_options = self::entity_options_for_type( ! empty( $selected_chart['type'] ) ? $selected_chart['type'] : $entry['entity_type'] );
+
+		self::render_panel_start( 'Workflow handoff', 'Use Weekly Entries after uploads and matching are clean: review generated draft rows here, then move to Publishing for final live review and publish actions.' );
+		echo '<div class="amc-admin-button-row">';
+		echo '<a class="button button-secondary" href="' . esc_url( AMC_Admin_Data::custom_dashboard_url( 'uploads' ) ) . '">Back to uploads</a>';
+		echo '<a class="button button-secondary" href="' . esc_url( AMC_Admin_Data::custom_dashboard_url( 'cleaning' ) ) . '">Open matching review</a>';
+		echo '<a class="button button-primary" href="' . esc_url( AMC_Admin_Data::custom_dashboard_url( 'publishing' ) ) . '">Continue to publishing</a>';
+		echo '</div>';
+		self::render_panel_end();
 
 		echo '<section class="amc-admin-grid amc-admin-grid--split">';
 		self::render_panel_start( 'Chart week controls', 'Create new chart weeks, switch status, and archive previous snapshots.' );
@@ -1092,6 +1130,8 @@ class AMC_Admin {
 
 	private static function render_uploads() {
 		$uploads = AMC_Admin_Data::uploads();
+		$guidance = AMC_Admin_Data::upload_guidance();
+		$onboarding = AMC_Admin_Data::onboarding_status();
 		$preview_upload_id = isset( $_GET['upload_id'] ) ? absint( wp_unslash( $_GET['upload_id'] ) ) : 0;
 		$preview_rows      = $preview_upload_id ? AMC_Ingestion::preview_rows( $preview_upload_id, 8 ) : array();
 		$invalid_groups    = $preview_upload_id ? AMC_Admin_Data::invalid_row_groups( $preview_upload_id ) : array();
@@ -1114,12 +1154,18 @@ class AMC_Admin {
 		self::submit_row( array( array( 'label' => 'Upload source sheet', 'class' => 'button-primary' ) ) );
 		self::close_form();
 		echo '<div class="amc-admin-definition-list">';
-		printf( '<div><strong>Spotify Weekly</strong><span>Expected columns: title, artist, rank optional, streams/plays, previous rank optional, peak rank optional, weeks on chart optional, album optional, uri/url optional. The column named "source" is ignored completely.</span></div>' );
-		printf( '<div><strong>YouTube Top Songs</strong><span>Expected columns: title, artist, rank, views or plays, optional growth, previous rank, peak rank, weeks on chart, url or uri.</span></div>' );
-		printf( '<div><strong>YouTube Top Artists</strong><span>Expected columns: artist/channel name, rank, views optional, growth optional, previous rank, peak rank, weeks on chart.</span></div>' );
-		printf( '<div><strong>Shazam Chart</strong><span>Expected columns: title, artist/subtitle, rank, shazams/count, optional previous rank, peak rank, weeks on chart.</span></div>' );
+		printf( '<div><strong>First-run selection tips</strong><span>Always choose source platform, country, target chart, chart type, and week/date before upload. The plugin does not auto-detect chart ownership.</span></div>' );
+		foreach ( $guidance as $item ) {
+			printf( '<div><strong>%1$s</strong><span>%2$s</span></div>', esc_html( $item['title'] ), esc_html( $item['copy'] ) );
+		}
 		printf( '<div><strong>Unsupported or corrupted files</strong><span>Unsupported formats and broken spreadsheets fail clearly with parser diagnostics. Use CSV, TSV, TXT, XLSX, or XLS exports only.</span></div>' );
 		echo '</div>';
+		if ( ! $onboarding['first_upload'] ) {
+			echo '<div class="amc-admin-button-row">';
+			echo '<a class="button button-secondary" href="' . esc_url( AMC_Admin_Data::custom_dashboard_url( 'charts' ) ) . '">Create chart first</a>';
+			echo '<a class="button button-secondary" href="' . esc_url( AMC_Admin_Data::custom_dashboard_url( 'scoring' ) ) . '">Configure scoring rules</a>';
+			echo '</div>';
+		}
 		self::render_panel_end();
 		self::render_panel_start( 'Recent source uploads', 'Operational view of incoming chart source sheets.' );
 		self::render_table(
@@ -1189,6 +1235,8 @@ class AMC_Admin {
 			} else {
 				echo '<p>No parsed preview rows are available for this upload yet.</p>';
 			}
+		} elseif ( empty( $uploads ) ) {
+			echo '<p>No source uploads have been processed yet. Start with a real CSV, TSV, TXT, XLSX, or XLS file and confirm the target chart metadata before uploading.</p>';
 		}
 		self::render_panel_end();
 		echo '</section>';
@@ -1200,6 +1248,9 @@ class AMC_Admin {
 		$override    = $override_id ? AMC_DB::get_row( 'matching_queue', $override_id ) : null;
 		echo '<section class="amc-admin-grid amc-admin-grid--split">';
 		self::render_panel_start( 'Duplicate and similarity queue', 'Approve, reject, or override persisted matching candidates generated from real upload rows.' );
+		if ( empty( $candidates ) ) {
+			echo '<p>No review-needed matches are waiting right now. When ambiguous rows arrive from uploads, they will appear here for manual review before generation.</p>';
+		}
 		self::render_table(
 			array( 'Candidate', 'Type', 'Confidence', 'Sources', 'Status', 'Actions' ),
 			array_map(
@@ -1296,6 +1347,7 @@ class AMC_Admin {
 		$data = AMC_Admin_Data::publishing_preview();
 		$weeks = AMC_DB::get_chart_weeks();
 		$week  = ! empty( $weeks[0] ) ? $weeks[0] : null;
+		$review = AMC_Admin_Data::first_publish_summary( $week ? (int) $week['id'] : 0 );
 		echo '<section class="amc-admin-grid amc-admin-grid--split">';
 		self::render_panel_start( 'Publishing preview', 'Preview generated chart weeks, compare against previous periods, and control publication state.' );
 		printf( '<div class="amc-admin-publish-week"><strong>%s</strong><span>Pipeline-backed preview</span></div>', esc_html( $data['current_week'] ) );
@@ -1330,6 +1382,27 @@ class AMC_Admin {
 			}
 			echo '</div>';
 			echo '<div class="amc-admin-button-row"><a class="button button-secondary" href="' . esc_url( self::action_url( 'export', (int) $week['id'], 'dropped_out' ) ) . '">Export dropped-out summary</a></div>';
+		}
+		self::render_panel_end();
+		self::render_panel_start( 'First publish review', 'Use this final preflight summary before taking a chart week live for the first time.' );
+		if ( ! empty( $review['available'] ) ) {
+			echo '<div class="amc-admin-definition-list">';
+			foreach ( $review['summary'] as $label => $value ) {
+				printf( '<div><strong>%1$s</strong><span>%2$s</span></div>', esc_html( $label ), esc_html( (string) $value ) );
+			}
+			echo '</div>';
+			echo '<div class="amc-admin-definition-list">';
+			foreach ( $review['safety'] as $check ) {
+				printf(
+					'<div><strong>%1$s</strong><span>%2$s %3$s</span></div>',
+					esc_html( $check['label'] ),
+					esc_html( ! empty( $check['state'] ) ? 'Ready:' : 'Attention:' ),
+					esc_html( $check['copy'] )
+				);
+			}
+			echo '</div>';
+		} else {
+			echo '<p>No generated chart week is ready for final publish review yet. Complete uploads, matching, and generation first.</p>';
 		}
 		self::render_panel_end();
 		echo '</section>';
@@ -1418,6 +1491,50 @@ class AMC_Admin {
 
 	private static function render_panel_end() {
 		echo '</section>';
+	}
+
+	/**
+	 * Shared onboarding/setup panel.
+	 *
+	 * @param bool   $wp_admin Whether rendering in wp-admin.
+	 * @param string $title Section title.
+	 * @param string $copy Section copy.
+	 * @return void
+	 */
+	private static function render_setup_panel( $wp_admin, $title, $copy ) {
+		$status = AMC_Admin_Data::onboarding_status();
+
+		self::render_panel_start( $title, $copy );
+		echo '<div class="amc-admin-stat-stack">';
+		printf( '<div><strong>%1$s / %2$s</strong><span>Readiness steps complete</span></div>', esc_html( (string) $status['completed_steps'] ), esc_html( (string) $status['total_steps'] ) );
+		printf( '<div><strong>%1$s</strong><span>Active charts created</span></div>', esc_html( (string) $status['charts_count'] ) );
+		printf( '<div><strong>%1$s</strong><span>Generated weeks</span></div>', esc_html( (string) $status['generated_weeks'] ) );
+		printf( '<div><strong>%1$s</strong><span>Published weeks</span></div>', esc_html( (string) $status['published_weeks'] ) );
+		echo '</div>';
+		echo '<div class="amc-admin-definition-list">';
+		foreach ( $status['steps'] as $step ) {
+			printf(
+				'<div><strong>%1$s</strong><span>%2$s %3$s <a href="%4$s">%5$s</a></span></div>',
+				esc_html( $step['label'] ),
+				esc_html( ! empty( $step['complete'] ) ? 'Done.' : 'Next.' ),
+				esc_html( $step['description'] ),
+				esc_url( $step['url'] ),
+				esc_html( $step['action'] )
+			);
+		}
+		echo '</div>';
+		if ( $status['is_ready'] ) {
+			echo '<p>Kontentainment Charts is operationally ready: charts exist, scoring has been configured, uploads have been processed, and at least one live week is already published.</p>';
+		} elseif ( $wp_admin ) {
+			echo '<div class="amc-admin-button-row"><a class="button button-primary" href="' . esc_url( AMC_Admin_Data::custom_dashboard_url() ) . '">Continue setup in /charts-dashboard</a></div>';
+		} else {
+			echo '<div class="amc-admin-button-row">';
+			echo '<a class="button button-primary" href="' . esc_url( AMC_Admin_Data::custom_dashboard_url( 'charts' ) ) . '">Start with charts</a>';
+			echo '<a class="button button-secondary" href="' . esc_url( AMC_Admin_Data::custom_dashboard_url( 'uploads' ) ) . '">Go to uploads</a>';
+			echo '<a class="button button-secondary" href="' . esc_url( AMC_Admin_Data::custom_dashboard_url( 'publishing' ) ) . '">Open publishing</a>';
+			echo '</div>';
+		}
+		self::render_panel_end();
 	}
 
 	private static function render_table( $headers, $rows ) {

@@ -8,6 +8,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 $context        = AMC_Data::get_home_context();
+$public_state   = AMC_Data::public_state();
 $hero_chart     = $context['hero_chart'];
 $featured       = $hero_chart && ! empty( $hero_chart['featured'] ) ? $hero_chart['featured'] : null;
 $chart          = $hero_chart;
@@ -21,13 +22,23 @@ include AMC_PLUGIN_DIR . 'templates/parts/site-header.php';
 	<section class="amc-home-hero">
 		<div class="amc-container amc-home-hero__inner">
 			<div class="amc-home-hero__copy">
-				<p class="amc-section-label">Week of <?php echo esc_html( wp_date( 'F j, Y' ) ); ?></p>
-				<h1>Premium chart stories with a bold editorial pulse.</h1>
-				<p>Track the week’s most influential artists, songs, and albums through a cinematic dark interface built for chart storytelling.</p>
+				<p class="amc-section-label"><?php echo esc_html( $public_state['has_published_data'] ? 'Week of ' . wp_date( 'F j, Y' ) : 'Kontentainment Charts' ); ?></p>
+				<?php if ( $public_state['has_published_data'] ) : ?>
+					<h1>Premium chart stories with a bold editorial pulse.</h1>
+					<p>Track the week’s most influential artists, songs, and albums through a cinematic dark interface built for chart storytelling.</p>
+				<?php elseif ( $public_state['has_charts'] ) : ?>
+					<h1>No live chart data yet, but the chart network is ready.</h1>
+					<p>Chart categories already exist. Publish the first live week from the Kontentainment Charts dashboard to start filling this homepage with real rankings.</p>
+				<?php else : ?>
+					<h1>Kontentainment Charts is ready for its first live chart week.</h1>
+					<p>Start in the dashboard by creating the first chart, configuring scoring rules, uploading a source file, and publishing the first real week.</p>
+				<?php endif; ?>
 				<div class="amc-home-hero__actions">
-					<a class="amc-button" href="<?php echo esc_url( AMC_Data::route_url( 'charts' ) ); ?>">Open Charts</a>
-					<?php if ( $hero_chart ) : ?>
+					<a class="amc-button" href="<?php echo esc_url( AMC_Data::route_url( 'charts' ) ); ?>"><?php echo esc_html( $public_state['has_published_data'] ? 'Open Charts' : 'View Chart Routes' ); ?></a>
+					<?php if ( $hero_chart && $public_state['has_published_data'] ) : ?>
 						<a class="amc-button amc-button--ghost" href="<?php echo esc_url( $hero_chart['url'] ); ?>">Open Lead Chart</a>
+					<?php else : ?>
+						<a class="amc-button amc-button--ghost" href="<?php echo esc_url( admin_url( 'admin.php?page=kontentainment-charts' ) ); ?>">Open Dashboard</a>
 					<?php endif; ?>
 				</div>
 			</div>
@@ -37,9 +48,9 @@ include AMC_PLUGIN_DIR . 'templates/parts/site-header.php';
 				<?php else : ?>
 					<section class="amc-featured">
 						<div class="amc-featured__content">
-							<p class="amc-section-label">No live chart week yet</p>
-							<h2>Charts will appear here once real chart weeks are published.</h2>
-							<p>Create chart categories, upload real source files, generate a chart week, then publish it to populate the public homepage.</p>
+							<p class="amc-section-label">No live chart data yet</p>
+							<h2><?php echo esc_html( $public_state['has_charts'] ? 'Publish the first week to activate the homepage.' : 'Create the first chart to begin onboarding.' ); ?></h2>
+							<p><?php echo esc_html( $public_state['has_charts'] ? 'Your chart routes are ready. The next step is uploading source files, reviewing parsing and matching, then publishing a live week.' : 'The plugin is installed cleanly and waiting for real production data. Once the first chart is created and published, this featured block will switch to live content.' ); ?></p>
 						</div>
 					</section>
 				<?php endif; ?>
@@ -61,7 +72,7 @@ include AMC_PLUGIN_DIR . 'templates/parts/site-header.php';
 						<?php include AMC_PLUGIN_DIR . 'templates/parts/chart-card.php'; ?>
 					<?php endforeach; ?>
 				<?php else : ?>
-					<p>No chart categories are active yet. Add charts from the Kontentainment Charts dashboard to start building the public index.</p>
+					<p>No chart categories are active yet. Create the first real chart from the Kontentainment Charts dashboard to start the onboarding flow.</p>
 				<?php endif; ?>
 			</div>
 		</div>
@@ -87,7 +98,7 @@ include AMC_PLUGIN_DIR . 'templates/parts/site-header.php';
 						</div>
 					<?php endforeach; ?>
 				<?php else : ?>
-					<p>No published track chart data is available yet.</p>
+					<p>No live track chart data is published yet. Once the first track chart week goes live, top rows will appear here automatically.</p>
 				<?php endif; ?>
 			</div>
 
@@ -109,7 +120,7 @@ include AMC_PLUGIN_DIR . 'templates/parts/site-header.php';
 						</div>
 					<?php endforeach; ?>
 				<?php else : ?>
-					<p>No published artist chart data is available yet.</p>
+					<p>No live artist chart data is published yet. Publish the first artist-facing week to activate this panel.</p>
 				<?php endif; ?>
 			</div>
 		</div>

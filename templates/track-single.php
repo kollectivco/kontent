@@ -13,6 +13,7 @@ $amc_body_class  = 'amc-track-page';
 $track_positions = $track ? AMC_Data::get_track_chart_positions( $track['id'] ) : array();
 $related_tracks  = $track ? AMC_Data::get_related_tracks( $track['id'], ! empty( $track['artist']['id'] ) ? $track['artist']['id'] : 0, 4 ) : array();
 $related_artists = $track && ! empty( $track['artist']['id'] ) ? AMC_Data::get_related_artists( $track['artist']['id'], 4 ) : array();
+$public_state    = AMC_Data::public_state();
 
 include AMC_PLUGIN_DIR . 'templates/parts/document-start.php';
 include AMC_PLUGIN_DIR . 'templates/parts/site-header.php';
@@ -77,8 +78,8 @@ include AMC_PLUGIN_DIR . 'templates/parts/site-header.php';
 						<p class="amc-section-label">Editorial Notes</p>
 						<h2>Why it’s charting</h2>
 					</div>
-					<p>This track lands like a premium lead-in moment: fast-recognition artwork, a commanding title lockup, and enough metadata to make the chart story legible at a glance.</p>
-					<p>The detail page now reads more like a magazine side feature, balancing context, related discoveries, and ranking appearances without introducing any backend systems yet.</p>
+					<p><?php echo esc_html( $public_state['has_published_data'] ? 'This track lands like a premium lead-in moment: fast-recognition artwork, a commanding title lockup, and enough metadata to make the chart story legible at a glance.' : 'This detail route is production-ready, but it will remain in a clean no-live-data state until a published chart week references this track.' ); ?></p>
+					<p><?php echo esc_html( $public_state['has_published_data'] ? 'The detail page now reads more like a magazine side feature, balancing context, related discoveries, and ranking appearances without introducing any backend systems yet.' : 'Once uploads are parsed, matched, generated, and published, chart appearances and related discovery modules will begin filling automatically.' ); ?></p>
 				</div>
 
 				<div class="amc-panel">

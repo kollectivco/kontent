@@ -8,6 +8,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 $charts          = AMC_Data::get_all_charts();
+$public_state    = AMC_Data::public_state();
 $amc_page_title  = 'Charts Index';
 $amc_body_class  = 'amc-charts-index';
 
@@ -18,8 +19,8 @@ include AMC_PLUGIN_DIR . 'templates/parts/site-header.php';
 	<section class="amc-page-hero">
 		<div class="amc-container">
 			<p class="amc-section-label">All Charts</p>
-			<h1>Every list lives on its own route, ready for future categories.</h1>
-			<p>These chart destinations are dynamically driven from plugin chart definitions and real plugin data, so future admin management can extend them without rebuilding the frontend.</p>
+			<h1><?php echo esc_html( $public_state['has_charts'] ? 'Every list lives on its own route, ready for live weekly updates.' : 'Chart routes are ready for the first production setup.' ); ?></h1>
+			<p><?php echo esc_html( $public_state['has_charts'] ? 'These chart destinations are dynamically driven from plugin chart definitions and real plugin data, so future admin management can extend them without rebuilding the frontend.' : 'No chart categories have been created yet. The public index stays online and branded while the dashboard guides first-time setup.' ); ?></p>
 		</div>
 	</section>
 
@@ -31,7 +32,7 @@ include AMC_PLUGIN_DIR . 'templates/parts/site-header.php';
 						<?php include AMC_PLUGIN_DIR . 'templates/parts/chart-card.php'; ?>
 					<?php endforeach; ?>
 				<?php else : ?>
-					<p>No chart categories are active yet. Add charts and publish chart weeks from the Kontentainment Charts dashboard to populate this page.</p>
+					<p>No chart categories are active yet. Create the first chart, configure scoring, upload real source data, and publish the first live week from the Kontentainment Charts dashboard.</p>
 				<?php endif; ?>
 			</div>
 		</div>

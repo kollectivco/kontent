@@ -3,7 +3,7 @@ Contributors: kollectivco
 Tags: music, charts, artists, tracks, albums
 Requires at least: 6.0
 Tested up to: 6.5
-Stable tag: 3.4.1
+Stable tag: 4.0.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -29,6 +29,9 @@ Features:
 3. Visit Settings > Permalinks once or reactivate the plugin to refresh routes.
 
 == Changelog ==
+
+= 4.0.0 =
+* Added a first-time onboarding flow, production setup checklist, guided first live data workflow, source-specific upload guidance, first publish review summary, and improved zero-data public/admin states without reintroducing any demo content.
 
 = 3.4.1 =
 * Removed all automatic demo seeding and mock fallback content, added legacy demo cleanup, and switched the plugin to production-style empty states for fresh installs.
