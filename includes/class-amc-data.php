@@ -336,10 +336,13 @@ class AMC_Data {
 	 * @return array
 	 */
 	public static function get_home_context() {
-		$charts = self::get_all_charts();
+		$charts   = self::get_all_charts();
+		$settings = AMC_DB::get_settings();
+		$hero_key = ! empty( $settings['homepage_chart'] ) ? $settings['homepage_chart'] : 'hot-100-tracks';
+		$hero     = isset( $charts[ $hero_key ] ) ? $charts[ $hero_key ] : reset( $charts );
 
 		return array(
-			'hero_chart'      => isset( $charts['hot-100-tracks'] ) ? $charts['hot-100-tracks'] : reset( $charts ),
+			'hero_chart'      => $hero,
 			'featured_charts' => array_slice( $charts, 0, 3 ),
 			'more_charts'     => array_slice( $charts, 3, null, true ),
 			'trending_tracks' => array_slice( self::get_chart_entries( 'top-tracks' ), 0, 4 ),
@@ -353,11 +356,21 @@ class AMC_Data {
 	 * @return array
 	 */
 	public static function get_all_charts() {
-		$definitions = self::chart_definitions();
-		$charts      = array();
+		$rows   = AMC_DB::get_rows(
+			'charts',
+			array(
+				'where'    => array( 'status' => 'active' ),
+				'order_by' => 'display_order ASC, id ASC',
+			)
+		);
+		$charts = array();
 
-		foreach ( $definitions as $slug => $definition ) {
-			$charts[ $slug ] = self::get_chart( $slug );
+		foreach ( $rows as $row ) {
+			$chart = self::hydrate_chart( $row );
+
+			if ( $chart ) {
+				$charts[ $chart['slug'] ] = $chart;
+			}
 		}
 
 		return $charts;
@@ -370,28 +383,13 @@ class AMC_Data {
 	 * @return array|null
 	 */
 	public static function get_chart( $slug ) {
-		$definitions = self::chart_definitions();
+		$row = AMC_DB::get_row_by_slug( 'charts', $slug );
 
-		if ( empty( $definitions[ $slug ] ) ) {
+		if ( ! $row || 'hidden' === $row['status'] ) {
 			return null;
 		}
 
-		$definition = $definitions[ $slug ];
-		$entries    = self::get_chart_entries( $slug );
-		$featured   = ! empty( $entries ) ? $entries[0] : null;
-
-		return array(
-			'slug'        => $slug,
-			'title'       => $definition['title'],
-			'kicker'      => $definition['kicker'],
-			'description' => $definition['description'],
-			'type'        => $definition['type'],
-			'accent'      => $definition['accent'],
-			'url'         => self::route_url( 'charts/' . $slug ),
-			'entries'     => $entries,
-			'featured'    => $featured,
-			'summary'     => self::get_chart_summary( $entries ),
-		);
+		return self::hydrate_chart( $row );
 	}
 
 	/**
@@ -401,22 +399,23 @@ class AMC_Data {
 	 * @return array
 	 */
 	public static function get_chart_entries( $slug ) {
-		$chart_post = get_page_by_path( $slug, OBJECT, 'amc_chart' );
+		$chart = AMC_DB::get_row_by_slug( 'charts', $slug );
 
-		if ( ! $chart_post ) {
+		if ( ! $chart ) {
 			return array();
 		}
 
-		$entries = get_post_meta( $chart_post->ID, '_amc_chart_entries', true );
+		$week = AMC_DB::get_current_published_week( (int) $chart['id'] );
 
-		if ( ! is_array( $entries ) ) {
+		if ( ! $week ) {
 			return array();
 		}
 
-		$view_models = array();
+		$entries      = AMC_DB::get_chart_entries( (int) $week['id'] );
+		$view_models  = array();
 
 		foreach ( $entries as $entry ) {
-			$entity = self::get_entity( $entry['entity_type'], $entry['entity_id'] );
+			$entity = self::get_entity( $entry['entity_type'], (int) $entry['entity_id'] );
 
 			if ( ! $entity ) {
 				continue;
@@ -426,6 +425,7 @@ class AMC_Data {
 				$entry,
 				array(
 					'entity'        => $entity,
+					'entity_id'     => (int) $entry['entity_id'],
 					'movement_icon' => self::movement_icon( $entry['movement'] ),
 					'movement_label'=> ucfirst( $entry['movement'] ),
 					'movement_delta'=> self::movement_delta( $entry ),
@@ -444,63 +444,68 @@ class AMC_Data {
 	 * @return array|null
 	 */
 	public static function get_entity( $type, $id ) {
-		$post = get_post( $id );
-
-		if ( ! $post ) {
-			return null;
-		}
-
-		$meta = get_post_meta( $id );
-
 		if ( 'artist' === $type ) {
+			$row = AMC_DB::get_row( 'artists', $id );
+
+			if ( ! $row || 'archived' === $row['status'] ) {
+				return null;
+			}
+
 			return array(
-				'id'          => $id,
+				'id'          => (int) $row['id'],
 				'type'        => 'artist',
-				'name'        => $post->post_title,
-				'slug'        => $post->post_name,
-				'description' => $post->post_content,
-				'excerpt'     => $post->post_excerpt,
-				'country'     => self::meta_value( $meta, '_amc_country' ),
-				'genres'      => self::meta_value( $meta, '_amc_genres' ),
-				'monthly'     => self::meta_value( $meta, '_amc_monthly_listeners' ),
-				'streak'      => self::meta_value( $meta, '_amc_chart_streak' ),
-				'gradient'    => self::meta_value( $meta, '_amc_gradient' ),
-				'url'         => self::route_url( 'artist/' . $post->post_name ),
+				'name'        => $row['name'],
+				'slug'        => $row['slug'],
+				'description' => $row['bio'],
+				'excerpt'     => $row['blurb'],
+				'country'     => $row['country'],
+				'genres'      => $row['genre'],
+				'monthly'     => $row['monthly_listeners'],
+				'streak'      => $row['chart_streak'],
+				'gradient'    => $row['gradient'],
+				'url'         => self::route_url( 'artist/' . $row['slug'] ),
 			);
 		}
 
 		if ( 'track' === $type ) {
-			$artist_id = (int) self::meta_value( $meta, '_amc_artist_id' );
-			$album_id  = (int) self::meta_value( $meta, '_amc_album_id' );
+			$row = AMC_DB::get_row( 'tracks', $id );
+
+			if ( ! $row || 'archived' === $row['status'] ) {
+				return null;
+			}
 
 			return array(
-				'id'          => $id,
+				'id'          => (int) $row['id'],
 				'type'        => 'track',
-				'name'        => $post->post_title,
-				'slug'        => $post->post_name,
-				'description' => $post->post_content,
-				'excerpt'     => $post->post_excerpt,
-				'duration'    => self::meta_value( $meta, '_amc_duration' ),
-				'gradient'    => self::meta_value( $meta, '_amc_gradient' ),
-				'artist'      => $artist_id ? self::get_entity( 'artist', $artist_id ) : null,
-				'album'       => $album_id ? self::get_entity( 'album', $album_id ) : null,
-				'url'         => self::route_url( 'track/' . $post->post_name ),
+				'name'        => $row['title'],
+				'slug'        => $row['slug'],
+				'description' => $row['description'],
+				'excerpt'     => $row['aliases'],
+				'duration'    => $row['duration'],
+				'gradient'    => $row['gradient'],
+				'artist'      => ! empty( $row['artist_id'] ) ? self::get_entity( 'artist', (int) $row['artist_id'] ) : null,
+				'album'       => ! empty( $row['album_id'] ) ? self::get_entity( 'album', (int) $row['album_id'] ) : null,
+				'url'         => self::route_url( 'track/' . $row['slug'] ),
 			);
 		}
 
 		if ( 'album' === $type ) {
-			$artist_id = (int) self::meta_value( $meta, '_amc_artist_id' );
+			$row = AMC_DB::get_row( 'albums', $id );
+
+			if ( ! $row || 'archived' === $row['status'] ) {
+				return null;
+			}
 
 			return array(
-				'id'          => $id,
+				'id'          => (int) $row['id'],
 				'type'        => 'album',
-				'name'        => $post->post_title,
-				'slug'        => $post->post_name,
-				'description' => $post->post_content,
-				'excerpt'     => $post->post_excerpt,
-				'year'        => self::meta_value( $meta, '_amc_release_year' ),
-				'gradient'    => self::meta_value( $meta, '_amc_gradient' ),
-				'artist'      => $artist_id ? self::get_entity( 'artist', $artist_id ) : null,
+				'name'        => $row['title'],
+				'slug'        => $row['slug'],
+				'description' => $row['description'],
+				'excerpt'     => $row['genre'],
+				'year'        => $row['release_year'],
+				'gradient'    => $row['gradient'],
+				'artist'      => ! empty( $row['artist_id'] ) ? self::get_entity( 'artist', (int) $row['artist_id'] ) : null,
 				'url'         => self::route_url( 'charts/top-albums/' ),
 			);
 		}
@@ -515,9 +520,9 @@ class AMC_Data {
 	 * @return array|null
 	 */
 	public static function get_track_by_slug( $slug ) {
-		$post = get_page_by_path( $slug, OBJECT, 'amc_track' );
+		$row = AMC_DB::get_row_by_slug( 'tracks', $slug );
 
-		return $post ? self::get_entity( 'track', $post->ID ) : null;
+		return $row ? self::get_entity( 'track', (int) $row['id'] ) : null;
 	}
 
 	/**
@@ -527,9 +532,9 @@ class AMC_Data {
 	 * @return array|null
 	 */
 	public static function get_artist_by_slug( $slug ) {
-		$post = get_page_by_path( $slug, OBJECT, 'amc_artist' );
+		$row = AMC_DB::get_row_by_slug( 'artists', $slug );
 
-		return $post ? self::get_entity( 'artist', $post->ID ) : null;
+		return $row ? self::get_entity( 'artist', (int) $row['id'] ) : null;
 	}
 
 	/**
@@ -555,27 +560,22 @@ class AMC_Data {
 	 * @return array
 	 */
 	public static function get_tracks_for_artist( $artist_id ) {
-		$posts = get_posts(
+		$rows = AMC_DB::get_rows(
+			'tracks',
 			array(
-				'post_type'      => 'amc_track',
-				'post_status'    => 'publish',
-				'posts_per_page' => -1,
-				'orderby'        => 'menu_order title',
-				'order'          => 'ASC',
-				'meta_query'     => array(
-					array(
-						'key'   => '_amc_artist_id',
-						'value' => $artist_id,
-					),
+				'where'    => array(
+					'artist_id' => absint( $artist_id ),
+					'status'    => 'active',
 				),
+				'order_by' => 'title ASC',
 			)
 		);
 
 		return array_map(
-			function ( $post ) {
-				return self::get_entity( 'track', $post->ID );
+			function ( $row ) {
+				return self::get_entity( 'track', (int) $row['id'] );
 			},
-			$posts
+			$rows
 		);
 	}
 
@@ -588,30 +588,33 @@ class AMC_Data {
 	 * @return array
 	 */
 	public static function get_related_tracks( $track_id, $artist_id = 0, $limit = 4 ) {
-		$posts = get_posts(
+		$rows   = AMC_DB::get_rows(
+			'tracks',
 			array(
-				'post_type'      => 'amc_track',
-				'post_status'    => 'publish',
-				'posts_per_page' => $limit + 2,
-				'post__not_in'   => array( $track_id ),
-				'meta_query'     => $artist_id ? array(
-					array(
-						'key'   => '_amc_artist_id',
-						'value' => $artist_id,
-					),
-				) : array(),
+				'where'    => array( 'status' => 'active' ),
+				'order_by' => 'title ASC',
 			)
 		);
+		$posts  = array();
+
+		foreach ( $rows as $row ) {
+			if ( (int) $row['id'] === (int) $track_id ) {
+				continue;
+			}
+
+			if ( $artist_id && (int) $row['artist_id'] !== (int) $artist_id ) {
+				continue;
+			}
+
+			$posts[] = $row;
+		}
 
 		if ( empty( $posts ) ) {
-			$posts = get_posts(
-				array(
-					'post_type'      => 'amc_track',
-					'post_status'    => 'publish',
-					'posts_per_page' => $limit,
-					'post__not_in'   => array( $track_id ),
-				)
-			);
+			foreach ( $rows as $row ) {
+				if ( (int) $row['id'] !== (int) $track_id ) {
+					$posts[] = $row;
+				}
+			}
 		}
 
 		return array_slice(
@@ -619,7 +622,7 @@ class AMC_Data {
 				array_filter(
 					array_map(
 						function ( $post ) {
-							return self::get_entity( 'track', $post->ID );
+							return self::get_entity( 'track', (int) $post['id'] );
 						},
 						$posts
 					)
@@ -777,13 +780,27 @@ class AMC_Data {
 	}
 
 	/**
-	 * Safe meta value.
+	 * Hydrate chart row into frontend model.
 	 *
-	 * @param array  $meta Meta array.
-	 * @param string $key Meta key.
-	 * @return string
+	 * @param array $row Chart row.
+	 * @return array
 	 */
-	private static function meta_value( $meta, $key ) {
-		return isset( $meta[ $key ][0] ) ? (string) $meta[ $key ][0] : '';
+	private static function hydrate_chart( $row ) {
+		$entries  = self::get_chart_entries( $row['slug'] );
+		$featured = ! empty( $entries ) ? $entries[0] : null;
+
+		return array(
+			'id'          => (int) $row['id'],
+			'slug'        => $row['slug'],
+			'title'       => $row['name'],
+			'kicker'      => $row['kicker'],
+			'description' => $row['description'],
+			'type'        => $row['type'],
+			'accent'      => $row['accent'],
+			'url'         => self::route_url( 'charts/' . $row['slug'] ),
+			'entries'     => $entries,
+			'featured'    => $featured,
+			'summary'     => self::get_chart_summary( $entries ),
+		);
 	}
 }

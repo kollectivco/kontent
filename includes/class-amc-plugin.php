@@ -32,6 +32,9 @@ class AMC_Plugin {
 	 * Constructor.
 	 */
 	private function __construct() {
+		add_action( 'init', array( 'AMC_DB', 'maybe_install' ), 1 );
+		add_action( 'init', array( 'AMC_Capabilities', 'install' ), 2 );
+		add_action( 'init', array( 'AMC_Ingestion', 'ensure_defaults' ), 3 );
 		add_action( 'init', array( $this, 'register_content_types' ), 5 );
 		add_action( 'init', array( 'AMC_Routing', 'register_routes' ), 20 );
 		add_action( 'init', array( $this, 'maybe_seed_demo_content' ), 30 );
@@ -51,6 +54,9 @@ class AMC_Plugin {
 	 */
 	public static function activate() {
 		$plugin = self::instance();
+		AMC_DB::install();
+		AMC_Capabilities::install();
+		AMC_Ingestion::ensure_defaults();
 		$plugin->register_content_types();
 		AMC_Routing::register_routes();
 		AMC_Seeder::seed();
@@ -230,7 +236,7 @@ class AMC_Plugin {
 	 */
 	public function maybe_seed_demo_content() {
 		$already_seeded = (int) get_option( 'amc_demo_seeded', 0 );
-		$has_home_data  = get_page_by_path( 'top-artists', OBJECT, 'amc_chart' );
+		$has_home_data  = AMC_DB::count_rows( 'charts' );
 
 		if ( $already_seeded && $has_home_data ) {
 			return;

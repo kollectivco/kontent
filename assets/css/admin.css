@@ -300,7 +300,9 @@
 	text-transform: uppercase;
 }
 
-.amc-admin-form input {
+.amc-admin-form input,
+.amc-admin-form textarea,
+.amc-admin-form select {
 	min-height: 44px;
 	padding: 10px 12px;
 	border: 1px solid var(--amc-theme-border-strong);
@@ -310,7 +312,12 @@
 	box-shadow: var(--amc-theme-input-shadow);
 }
 
-.amc-admin-form input::placeholder {
+.amc-admin-form textarea {
+	resize: vertical;
+}
+
+.amc-admin-form input::placeholder,
+.amc-admin-form textarea::placeholder {
 	color: var(--amc-theme-text-muted);
 }
 

@@ -3,7 +3,7 @@ Contributors: kollectivco
 Tags: music, charts, artists, tracks, albums
 Requires at least: 6.0
 Tested up to: 6.5
-Stable tag: 2.1.3
+Stable tag: 3.1.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -30,6 +30,16 @@ Features:
 3. Visit Settings > Permalinks once or reactivate the plugin to refresh routes.
 
 == Changelog ==
+
+= 3.1.1 =
+* Added a visible plugin-row "Check for updates" link and a forced GitHub refresh action inside wp-admin tools.
+* Pushed the real Phase 3.1 backend for source uploads, parsing foundations, matching persistence, scoring rules, and ingestion logs.
+
+= 3.1.0 =
+* Added real source uploads, parsing foundations, matching queue persistence, scoring rules persistence, and ingestion logs for the Phase 3.1 backend layer.
+
+= 3.0.0 =
+* Added real Phase 3 backend tables, CRUD wiring, publishing/archive state flow, persisted settings, and capability-based access across the admin and public chart data layer.
 
 = 2.1.3 =
 * Added a shared dark/light theme system for wp-admin pages and the custom dashboard, with dark mode as the default and persistent theme switching.

@@ -15,6 +15,11 @@ class AMC_Admin {
 	 */
 	public static function boot() {
 		add_action( 'admin_menu', array( __CLASS__, 'register_menu' ) );
+		add_action( 'admin_post_amc_save_entity', array( __CLASS__, 'handle_save_entity' ) );
+		add_action( 'admin_post_amc_row_action', array( __CLASS__, 'handle_row_action' ) );
+		add_action( 'admin_post_amc_save_settings', array( __CLASS__, 'handle_save_settings' ) );
+		add_action( 'admin_post_amc_upload_source', array( __CLASS__, 'handle_upload_source' ) );
+		add_action( 'admin_post_amc_save_scoring', array( __CLASS__, 'handle_save_scoring' ) );
 
 		if ( is_admin() ) {
 			add_action( 'admin_enqueue_scripts', array( __CLASS__, 'enqueue_assets' ) );
@@ -33,7 +38,7 @@ class AMC_Admin {
 		add_menu_page(
 			'Kontentainment Charts',
 			'Kontentainment Charts',
-			'manage_options',
+			'amc_view_dashboard',
 			$admin_pages['overview']['menu_slug'],
 			array( __CLASS__, 'render_page' ),
 			'dashicons-chart-area',
@@ -49,7 +54,7 @@ class AMC_Admin {
 				$admin_pages['overview']['menu_slug'],
 				'Kontentainment Charts - ' . $page['title'],
 				$page['title'],
-				'manage_options',
+				self::page_capability( $key, true ),
 				$page['menu_slug'],
 				array( __CLASS__, 'render_page' )
 			);
@@ -60,7 +65,7 @@ class AMC_Admin {
 				null,
 				'Kontentainment Charts - ' . $page['title'],
 				$page['title'],
-				'manage_options',
+				self::page_capability( $key, false ),
 				$page['menu_slug'],
 				array( __CLASS__, 'render_page' )
 			);
@@ -127,7 +132,7 @@ class AMC_Admin {
 			auth_redirect();
 		}
 
-		if ( ! current_user_can( 'manage_options' ) ) {
+		if ( ! current_user_can( 'amc_view_dashboard' ) ) {
 			wp_die( esc_html__( 'You do not have permission to access Kontentainment Charts dashboard.', 'arabic-music-charts' ) );
 		}
 
@@ -170,6 +175,7 @@ class AMC_Admin {
 				</header>
 
 				<div class="amc-admin-content">
+					<?php self::render_notices(); ?>
 					<?php self::render_workspace_view( $key ); ?>
 				</div>
 			</div>
@@ -220,6 +226,7 @@ class AMC_Admin {
 		</nav>
 
 		<div class="amc-admin-content">
+			<?php self::render_notices(); ?>
 			<?php
 			switch ( $key ) {
 				case 'settings':
@@ -341,8 +348,20 @@ class AMC_Admin {
 	 */
 	private static function render_wp_admin_settings() {
 		self::render_panel_start( 'Plugin settings', 'Brand, homepage chart defaults, methodology text, SEO defaults, language, and date format remain available in wp-admin.' );
-		self::render_form( AMC_Admin_Data::settings() );
-		self::render_button_row( array( 'Save settings', 'Open full settings dashboard' ) );
+		$settings = AMC_DB::get_settings();
+		self::open_form( 'save_settings' );
+		echo '<div class="amc-admin-form">';
+		self::field_input( 'Platform name', 'platform_name', $settings['platform_name'] );
+		self::field_input( 'Logo', 'logo', $settings['logo'] );
+		self::field_input( 'SEO defaults', 'seo_defaults', $settings['seo_defaults'] );
+		self::field_input( 'Social image', 'social_image', $settings['social_image'] );
+		self::field_select( 'Homepage chart', 'homepage_chart', $settings['homepage_chart'], self::chart_slug_options() );
+		self::field_textarea( 'Methodology text', 'methodology_text', $settings['methodology_text'] );
+		self::field_input( 'Language', 'language', $settings['language'] );
+		self::field_input( 'Date format', 'date_format', $settings['date_format'] );
+		echo '</div>';
+		echo '<div class="amc-admin-button-row"><button type="submit" class="button button-primary">Save settings</button><a class="button button-secondary" href="' . esc_url( AMC_Admin_Data::custom_dashboard_url( 'settings' ) ) . '">Open full settings dashboard</a></div>';
+		self::close_form();
 		self::render_panel_end();
 	}
 
@@ -355,6 +374,10 @@ class AMC_Admin {
 		$tools = AMC_Admin_Data::tools();
 
 		self::render_panel_start( 'Plugin tools', 'Maintenance and helper tools stay in wp-admin while operational work moves into /charts-dashboard.' );
+		echo '<div class="amc-admin-button-row">';
+		echo '<a class="button button-primary" href="' . esc_url( AMC_Updater::check_updates_url() ) . '">Check for updates</a>';
+		echo '<a class="button button-secondary" href="' . esc_url( admin_url( 'update-core.php?force-check=1' ) ) . '">Open WordPress Updates</a>';
+		echo '</div>';
 		self::render_table(
 			array( 'Tool', 'Description', 'Action' ),
 			array_map(
@@ -474,6 +497,68 @@ class AMC_Admin {
 		}
 	}
 
+	/**
+	 * Get capability for a page key.
+	 *
+	 * @param string $key Page key.
+	 * @param bool   $wp_admin Whether this is a wp-admin page.
+	 * @return string
+	 */
+	private static function page_capability( $key, $wp_admin = false ) {
+		$map = array(
+			'overview'       => 'amc_view_dashboard',
+			'tools'          => 'amc_view_dashboard',
+			'logs'           => 'amc_view_dashboard',
+			'permissions'    => 'amc_manage_settings',
+			'open-dashboard' => 'amc_view_dashboard',
+			'settings'       => 'amc_manage_settings',
+			'dashboard'      => 'amc_view_dashboard',
+			'charts'         => 'amc_manage_charts',
+			'weekly-entries' => 'amc_manage_weeks',
+			'tracks'         => 'amc_manage_library',
+			'artists'        => 'amc_manage_library',
+			'albums'         => 'amc_manage_library',
+			'uploads'        => 'amc_manage_weeks',
+			'cleaning'       => 'amc_manage_weeks',
+			'scoring'        => 'amc_manage_weeks',
+			'publishing'     => 'amc_publish_charts',
+			'archives'       => 'amc_publish_charts',
+			'users'          => 'amc_manage_settings',
+		);
+
+		if ( ! empty( $map[ $key ] ) ) {
+			return $map[ $key ];
+		}
+
+		return $wp_admin ? 'amc_view_dashboard' : 'amc_manage_settings';
+	}
+
+	/**
+	 * Render notices from redirects.
+	 *
+	 * @return void
+	 */
+	private static function render_notices() {
+		$type    = isset( $_GET['amc_notice_type'] ) ? sanitize_key( wp_unslash( $_GET['amc_notice_type'] ) ) : '';
+		$message = isset( $_GET['amc_notice'] ) ? sanitize_text_field( wp_unslash( $_GET['amc_notice'] ) ) : '';
+
+		if ( ! $type || ! $message ) {
+			return;
+		}
+
+		$tone = 'info';
+
+		if ( 'success' === $type ) {
+			$tone = 'info';
+		} elseif ( 'error' === $type ) {
+			$tone = 'danger';
+		} elseif ( 'warning' === $type ) {
+			$tone = 'warning';
+		}
+
+		echo '<section class="amc-admin-alert amc-admin-alert--' . esc_attr( $tone ) . '"><strong>' . esc_html( ucfirst( $type ) ) . '</strong><p>' . esc_html( $message ) . '</p></section>';
+	}
+
 	private static function find_admin_page_by_slug( $slug ) {
 		foreach ( AMC_Admin_Data::wp_admin_pages() as $key => $page ) {
 			if ( $page['menu_slug'] === $slug ) {
@@ -556,29 +641,60 @@ class AMC_Admin {
 
 	private static function render_charts() {
 		$charts = AMC_Admin_Data::chart_categories();
+		$id     = isset( $_GET['chart_id'] ) ? absint( wp_unslash( $_GET['chart_id'] ) ) : 0;
+		$chart  = $id ? AMC_DB::get_row( 'charts', $id ) : null;
+		$chart  = $chart ? $chart : array(
+			'id'               => 0,
+			'name'             => '',
+			'slug'             => '',
+			'description'      => '',
+			'type'             => 'track',
+			'cover_image'      => '',
+			'display_order'    => count( $charts ) + 1,
+			'status'           => 'active',
+			'is_featured_home' => 0,
+			'archive_enabled'  => 1,
+			'accent'           => 'amber',
+			'kicker'           => '',
+		);
 		echo '<section class="amc-admin-grid amc-admin-grid--split">';
-		self::render_panel_start( 'Create chart category', 'UI-only controls for dynamic chart creation and future expansion.' );
-		self::render_form(
+		self::render_panel_start( $id ? 'Edit chart category' : 'Create chart category', 'Dynamic chart creation now writes to the plugin database and is no longer hardcoded.' );
+		self::open_form(
+			'save_entity',
 			array(
-				'Chart name' => 'Top New Voices',
-				'Slug' => 'top-new-voices',
-				'Description' => 'Emerging artist momentum tracker.',
-				'Type' => 'Artists',
-				'Cover image' => 'Upload field placeholder',
-				'Display order' => '6',
-				'Active / Hidden' => 'Hidden',
-				'Featured on homepage' => 'No',
-				'Archive enabled' => 'No',
+				'entity' => 'chart',
+				'id'     => $chart['id'],
 			)
 		);
-		self::render_button_row( array( 'Save draft category', 'Create chart', 'Reset form' ) );
+		echo '<div class="amc-admin-form">';
+		self::field_input( 'Chart name', 'name', $chart['name'] );
+		self::field_input( 'Slug', 'slug', $chart['slug'] );
+		self::field_textarea( 'Description', 'description', $chart['description'] );
+		self::field_select( 'Type', 'type', $chart['type'], array( 'track' => 'Tracks', 'artist' => 'Artists', 'album' => 'Albums' ) );
+		self::field_input( 'Cover image', 'cover_image', $chart['cover_image'] );
+		self::field_input( 'Display order', 'display_order', $chart['display_order'], 'number' );
+		self::field_select( 'Active / Hidden', 'status', $chart['status'], array( 'active' => 'Active', 'hidden' => 'Hidden' ) );
+		self::field_checkbox( 'Featured on homepage', 'is_featured_home', ! empty( $chart['is_featured_home'] ) );
+		self::field_checkbox( 'Archive enabled', 'archive_enabled', ! empty( $chart['archive_enabled'] ) );
+		self::field_select( 'Accent', 'accent', $chart['accent'], array( 'amber' => 'Amber', 'crimson' => 'Crimson', 'teal' => 'Teal', 'violet' => 'Violet', 'blue' => 'Blue' ) );
+		self::field_input( 'Kicker', 'kicker', $chart['kicker'] );
+		echo '</div>';
+		self::submit_row( array( array( 'label' => $id ? 'Update chart' : 'Create chart', 'class' => 'button-primary' ) ) );
+		self::close_form();
 		self::render_panel_end();
 		self::render_panel_start( 'Existing chart categories', 'Categories remain dynamic and are not hardcoded to a fixed set.' );
 		self::render_table(
-			array( 'Chart name', 'Slug', 'Type', 'Order', 'Status', 'Featured', 'Archive' ),
+			array( 'Chart name', 'Slug', 'Type', 'Order', 'Status', 'Featured', 'Archive', 'Actions' ),
 			array_map(
 				function ( $row ) {
-					return array( $row['name'], $row['slug'], $row['type'], (string) $row['display_order'], $row['active'], $row['featured'], $row['archive'] );
+					$actions = array(
+						'<a href="' . esc_url( add_query_arg( 'chart_id', $row['id'], self::current_url() ) ) . '">Edit</a>',
+						'<a href="' . esc_url( self::action_url( 'chart', $row['id'], 'Active' === $row['active'] ? 'hide' : 'activate' ) ) . '">' . esc_html( 'Active' === $row['active'] ? 'Hide' : 'Activate' ) . '</a>',
+						'<a href="' . esc_url( self::action_url( 'chart', $row['id'], 'Yes' === $row['featured'] ? 'unfeature' : 'feature' ) ) . '">' . esc_html( 'Yes' === $row['featured'] ? 'Unfeature' : 'Feature' ) . '</a>',
+						'<a href="' . esc_url( self::action_url( 'chart', $row['id'], 'delete' ) ) . '">Delete</a>',
+					);
+
+					return array( $row['name'], $row['slug'], $row['type'], (string) $row['display_order'], $row['active'], $row['featured'], $row['archive'], array( 'value' => implode( ' / ', $actions ), 'html' => true ) );
 				},
 				$charts
 			)
@@ -588,26 +704,127 @@ class AMC_Admin {
 	}
 
 	private static function render_weekly_entries() {
-		$entries = AMC_Admin_Data::weekly_entries();
+		$weeks   = AMC_DB::get_chart_weeks();
+		$week_id = isset( $_GET['week_id'] ) ? absint( wp_unslash( $_GET['week_id'] ) ) : 0;
+		$entry_id= isset( $_GET['entry_id'] ) ? absint( wp_unslash( $_GET['entry_id'] ) ) : 0;
+		$week    = $week_id ? AMC_DB::get_row( 'chart_weeks', $week_id ) : null;
+
+		if ( ! $week && ! empty( $weeks[0] ) ) {
+			$week = $weeks[0];
+		}
+
+		$entries = $week ? AMC_Admin_Data::entries_for_week( (int) $week['id'] ) : array();
+		$entry   = $entry_id ? AMC_DB::get_row( 'chart_entries', $entry_id ) : null;
+
+		if ( ! $week ) {
+			$week = array(
+				'id'          => 0,
+				'chart_id'    => 0,
+				'week_date'   => current_time( 'Y-m-d' ),
+				'status'      => 'draft',
+				'is_featured' => 0,
+				'notes'       => '',
+			);
+		}
+
+		if ( ! $entry ) {
+			$entry = array(
+				'id'             => 0,
+				'chart_week_id'  => $week['id'],
+				'entity_type'    => 'track',
+				'entity_id'      => 0,
+				'current_rank'   => 1,
+				'previous_rank'  => 0,
+				'peak_rank'      => 1,
+				'weeks_on_chart' => 1,
+				'movement'       => 'new',
+				'score'          => '0.00',
+				'artwork'        => '',
+			);
+		}
+
+		$selected_chart = ! empty( $week['chart_id'] ) ? AMC_DB::get_row( 'charts', (int) $week['chart_id'] ) : null;
+		$entity_options = self::entity_options_for_type( ! empty( $selected_chart['type'] ) ? $selected_chart['type'] : $entry['entity_type'] );
+
 		echo '<section class="amc-admin-grid amc-admin-grid--split">';
 		self::render_panel_start( 'Chart week controls', 'Create new chart weeks, switch status, and archive previous snapshots.' );
-		self::render_form(
+		self::open_form(
+			'save_entity',
 			array(
-				'Chart category' => 'Hot 100 Tracks',
-				'Week / date' => '2026-03-20',
-				'Status' => 'Draft',
-				'Feature on homepage' => 'Yes',
-				'Archive previous week' => 'After publish',
+				'entity' => 'week',
+				'id'     => $week['id'],
 			)
 		);
-		self::render_button_row( array( 'Save as draft', 'Publish week', 'Archive older week' ) );
+		echo '<div class="amc-admin-form">';
+		self::field_select( 'Chart category', 'chart_id', $week['chart_id'], self::chart_options() );
+		self::field_input( 'Week / date', 'week_date', $week['week_date'], 'date' );
+		self::field_select( 'Status', 'status', $week['status'], array( 'draft' => 'Draft', 'published' => 'Published', 'archived' => 'Archived' ) );
+		self::field_checkbox( 'Feature on homepage', 'is_featured', ! empty( $week['is_featured'] ) );
+		self::field_textarea( 'Notes', 'notes', $week['notes'] );
+		echo '</div>';
+		self::submit_row( array( array( 'label' => $week['id'] ? 'Update week' : 'Create week', 'class' => 'button-primary' ) ) );
+		self::close_form();
+
+		if ( ! empty( $weeks ) ) {
+			self::render_table(
+				array( 'Week', 'Chart', 'Status', 'Featured', 'Actions' ),
+				array_map(
+					function ( $row ) {
+						$chart = AMC_DB::get_row( 'charts', (int) $row['chart_id'] );
+						$actions = array(
+							'<a href="' . esc_url( add_query_arg( 'week_id', $row['id'], self::current_url() ) ) . '">Edit</a>',
+							'<a href="' . esc_url( self::action_url( 'week', $row['id'], 'published' === $row['status'] ? 'unpublish' : 'publish' ) ) . '">' . esc_html( 'published' === $row['status'] ? 'Unpublish' : 'Publish' ) . '</a>',
+							'<a href="' . esc_url( self::action_url( 'week', $row['id'], 'archived' === $row['status'] ? 'restore' : 'archive' ) ) . '">' . esc_html( 'archived' === $row['status'] ? 'Restore' : 'Archive' ) . '</a>',
+							'<a href="' . esc_url( self::action_url( 'week', $row['id'], ! empty( $row['is_featured'] ) ? 'unfeature' : 'feature' ) ) . '">' . esc_html( ! empty( $row['is_featured'] ) ? 'Unfeature' : 'Feature' ) . '</a>',
+						);
+						return array(
+							$row['week_date'],
+							$chart ? $chart['name'] : 'Unknown',
+							ucfirst( $row['status'] ),
+							! empty( $row['is_featured'] ) ? 'Yes' : 'No',
+							array( 'value' => implode( ' / ', $actions ), 'html' => true ),
+						);
+					},
+					$weeks
+				)
+			);
+		}
 		self::render_panel_end();
 		self::render_panel_start( 'Weekly ranking entries', 'Manual editing UI for current rank, previous rank, peak rank, movement, score, and linked artwork.' );
+		if ( ! empty( $week['id'] ) ) {
+			self::open_form(
+				'save_entity',
+				array(
+					'entity'        => 'entry',
+					'id'            => $entry['id'],
+					'chart_week_id' => $week['id'],
+				)
+			);
+			echo '<div class="amc-admin-form">';
+			self::field_select( 'Entity type', 'entity_type', $entry['entity_type'], array( 'track' => 'Track', 'artist' => 'Artist', 'album' => 'Album' ) );
+			self::field_select( 'Linked item', 'entity_id', $entry['entity_id'], $entity_options );
+			self::field_input( 'Current rank', 'current_rank', $entry['current_rank'], 'number' );
+			self::field_input( 'Previous rank', 'previous_rank', $entry['previous_rank'], 'number' );
+			self::field_input( 'Peak rank', 'peak_rank', $entry['peak_rank'], 'number' );
+			self::field_input( 'Weeks on chart', 'weeks_on_chart', $entry['weeks_on_chart'], 'number' );
+			self::field_select( 'Movement', 'movement', $entry['movement'], array( 'up' => 'Up', 'down' => 'Down', 'same' => 'Same', 'new' => 'New' ) );
+			self::field_input( 'Score', 'score', $entry['score'], 'number' );
+			self::field_input( 'Artwork', 'artwork', $entry['artwork'] );
+			echo '</div>';
+			self::submit_row( array( array( 'label' => $entry['id'] ? 'Update entry' : 'Add entry', 'class' => 'button-primary' ) ) );
+			self::close_form();
+		} else {
+			echo '<p>Create or select a chart week first to manage entries.</p>';
+		}
 		self::render_table(
-			array( 'Rank', 'Linked item', 'Artist', 'Previous', 'Peak', 'Weeks', 'Move', 'Score', 'Status' ),
+			array( 'Rank', 'Linked item', 'Artist', 'Previous', 'Peak', 'Weeks', 'Move', 'Score', 'Status', 'Actions' ),
 			array_map(
-				function ( $row ) {
-					return array( (string) $row['rank'], $row['item'], $row['linked'], (string) $row['previous'], (string) $row['peak'], (string) $row['weeks'], $row['movement'], $row['score'], $row['status'] );
+				function ( $row ) use ( $week ) {
+					$actions = array(
+						'<a href="' . esc_url( add_query_arg( array( 'week_id' => (int) $week['id'], 'entry_id' => $row['id'] ), self::current_url() ) ) . '">Edit</a>',
+						'<a href="' . esc_url( self::action_url( 'entry', $row['id'], 'delete' ) ) . '">Delete</a>',
+					);
+					return array( (string) $row['rank'], $row['item'], $row['linked'], (string) $row['previous'], (string) $row['peak'], (string) $row['weeks'], $row['movement'], $row['score'], $row['status'], array( 'value' => implode( ' / ', $actions ), 'html' => true ) );
 				},
 				$entries
 			)
@@ -618,29 +835,62 @@ class AMC_Admin {
 
 	private static function render_tracks() {
 		$tracks = AMC_Admin_Data::tracks();
+		$id     = isset( $_GET['track_id'] ) ? absint( wp_unslash( $_GET['track_id'] ) ) : 0;
+		$track  = $id ? AMC_DB::get_row( 'tracks', $id ) : null;
+		$track  = $track ? $track : array(
+			'id'           => 0,
+			'title'        => '',
+			'slug'         => '',
+			'cover_image'  => '',
+			'artist_id'    => 0,
+			'album_id'     => 0,
+			'isrc'         => '',
+			'aliases'      => '',
+			'release_date' => '',
+			'genre'        => '',
+			'duration'     => '',
+			'description'  => '',
+			'gradient'     => 'ocean',
+			'status'       => 'active',
+		);
 		echo '<section class="amc-admin-grid amc-admin-grid--split">';
 		self::render_panel_start( 'Track editor', 'Manage title, slug, artist, album, ISRC, aliases, release date, genre, and visibility state.' );
-		self::render_form(
+		self::open_form(
+			'save_entity',
 			array(
-				'Track title' => 'Shabab El Layl',
-				'Slug' => 'shabab-el-layl',
-				'Cover art' => 'Artwork picker placeholder',
-				'Artist' => 'Nancy Ajram',
-				'Album' => 'Noor Nights',
-				'ISRC' => 'EG-KTN-26-00001',
-				'Aliases' => 'Shabab El Leil',
-				'Release date' => '2026-02-14',
-				'Genre' => 'Regional Pop',
-				'Active / Hidden' => 'Active',
+				'entity' => 'track',
+				'id'     => $track['id'],
 			)
 		);
+		echo '<div class="amc-admin-form">';
+		self::field_input( 'Track title', 'title', $track['title'] );
+		self::field_input( 'Slug', 'slug', $track['slug'] );
+		self::field_input( 'Cover art', 'cover_image', $track['cover_image'] );
+		self::field_select( 'Artist', 'artist_id', $track['artist_id'], self::artist_options() );
+		self::field_select( 'Album', 'album_id', $track['album_id'], self::album_options( true ) );
+		self::field_input( 'ISRC', 'isrc', $track['isrc'] );
+		self::field_input( 'Aliases', 'aliases', $track['aliases'] );
+		self::field_input( 'Release date', 'release_date', $track['release_date'], 'date' );
+		self::field_input( 'Genre', 'genre', $track['genre'] );
+		self::field_input( 'Duration', 'duration', $track['duration'] );
+		self::field_textarea( 'Description', 'description', $track['description'] );
+		self::field_select( 'Gradient', 'gradient', $track['gradient'], self::gradient_options() );
+		self::field_select( 'Active / Hidden', 'status', $track['status'], array( 'active' => 'Active', 'hidden' => 'Hidden', 'archived' => 'Archived' ) );
+		echo '</div>';
+		self::submit_row( array( array( 'label' => $id ? 'Update track' : 'Create track', 'class' => 'button-primary' ) ) );
+		self::close_form();
 		self::render_panel_end();
 		self::render_panel_start( 'Track library', 'Current seeded view of editable track records.' );
 		self::render_table(
-			array( 'Title', 'Artist', 'Album', 'ISRC', 'Aliases', 'Release date', 'Genre', 'Status' ),
+			array( 'Title', 'Artist', 'Album', 'ISRC', 'Aliases', 'Release date', 'Genre', 'Status', 'Actions' ),
 			array_map(
 				function ( $row ) {
-					return array( $row['title'], $row['artist'], $row['album'], $row['isrc'], $row['aliases'], $row['release_date'], $row['genre'], $row['status'] );
+					$actions = array(
+						'<a href="' . esc_url( add_query_arg( 'track_id', $row['id'], self::current_url() ) ) . '">Edit</a>',
+						'<a href="' . esc_url( self::action_url( 'track', $row['id'], 'archived' === $row['raw_status'] ? 'restore' : 'archive' ) ) . '">' . esc_html( 'archived' === $row['raw_status'] ? 'Restore' : 'Archive' ) . '</a>',
+						'<a href="' . esc_url( self::action_url( 'track', $row['id'], 'delete' ) ) . '">Delete</a>',
+					);
+					return array( $row['title'], $row['artist'], $row['album'], $row['isrc'], $row['aliases'], $row['release_date'], $row['genre'], $row['status'], array( 'value' => implode( ' / ', $actions ), 'html' => true ) );
 				},
 				$tracks
 			)
@@ -651,29 +901,60 @@ class AMC_Admin {
 
 	private static function render_artists() {
 		$artists = AMC_Admin_Data::artists();
+		$id      = isset( $_GET['artist_id'] ) ? absint( wp_unslash( $_GET['artist_id'] ) ) : 0;
+		$artist  = $id ? AMC_DB::get_row( 'artists', $id ) : null;
+		$artist  = $artist ? $artist : array(
+			'id'                => 0,
+			'name'              => '',
+			'slug'              => '',
+			'image'             => '',
+			'bio'               => '',
+			'country'           => '',
+			'genre'             => '',
+			'social_links'      => '',
+			'monthly_listeners' => '',
+			'chart_streak'      => '',
+			'gradient'          => 'ocean',
+			'status'            => 'active',
+			'blurb'             => '',
+		);
 		echo '<section class="amc-admin-grid amc-admin-grid--split">';
 		self::render_panel_start( 'Artist editor', 'Profile fields for bio, socials, country, genre, related tracks, albums, and visibility.' );
-		self::render_form(
+		self::open_form(
+			'save_entity',
 			array(
-				'Artist name' => 'Nancy Ajram',
-				'Slug' => 'nancy-ajram',
-				'Image' => 'Profile image placeholder',
-				'Bio' => 'Chart-dominating pop icon with polished hooks.',
-				'Country' => 'Lebanon',
-				'Genre' => 'Regional Pop, Dance Pop',
-				'Social links' => 'Instagram, YouTube, TikTok',
-				'Related tracks' => '6 linked',
-				'Related albums' => '2 linked',
-				'Active / Hidden' => 'Active',
+				'entity' => 'artist',
+				'id'     => $artist['id'],
 			)
 		);
+		echo '<div class="amc-admin-form">';
+		self::field_input( 'Artist name', 'name', $artist['name'] );
+		self::field_input( 'Slug', 'slug', $artist['slug'] );
+		self::field_input( 'Image', 'image', $artist['image'] );
+		self::field_textarea( 'Bio', 'bio', $artist['bio'] );
+		self::field_input( 'Country', 'country', $artist['country'] );
+		self::field_input( 'Genre', 'genre', $artist['genre'] );
+		self::field_input( 'Social links', 'social_links', $artist['social_links'] );
+		self::field_input( 'Monthly listeners', 'monthly_listeners', $artist['monthly_listeners'] );
+		self::field_input( 'Chart streak', 'chart_streak', $artist['chart_streak'] );
+		self::field_input( 'Short blurb', 'blurb', $artist['blurb'] );
+		self::field_select( 'Gradient', 'gradient', $artist['gradient'], self::gradient_options() );
+		self::field_select( 'Active / Hidden', 'status', $artist['status'], array( 'active' => 'Active', 'hidden' => 'Hidden', 'archived' => 'Archived' ) );
+		echo '</div>';
+		self::submit_row( array( array( 'label' => $id ? 'Update artist' : 'Create artist', 'class' => 'button-primary' ) ) );
+		self::close_form();
 		self::render_panel_end();
 		self::render_panel_start( 'Artist library', 'Seeded artist records and metadata overview.' );
 		self::render_table(
-			array( 'Name', 'Country', 'Genre', 'Socials', 'Tracks', 'Albums', 'Status' ),
+			array( 'Name', 'Country', 'Genre', 'Socials', 'Tracks', 'Albums', 'Status', 'Actions' ),
 			array_map(
 				function ( $row ) {
-					return array( $row['name'], $row['country'], $row['genre'], $row['socials'], (string) $row['related_tracks'], (string) $row['related_albums'], $row['status'] );
+					$actions = array(
+						'<a href="' . esc_url( add_query_arg( 'artist_id', $row['id'], self::current_url() ) ) . '">Edit</a>',
+						'<a href="' . esc_url( self::action_url( 'artist', $row['id'], 'archived' === $row['raw_status'] ? 'restore' : 'archive' ) ) . '">' . esc_html( 'archived' === $row['raw_status'] ? 'Restore' : 'Archive' ) . '</a>',
+						'<a href="' . esc_url( self::action_url( 'artist', $row['id'], 'delete' ) ) . '">Delete</a>',
+					);
+					return array( $row['name'], $row['country'], $row['genre'], $row['socials'], (string) $row['related_tracks'], (string) $row['related_albums'], $row['status'], array( 'value' => implode( ' / ', $actions ), 'html' => true ) );
 				},
 				$artists
 			)
@@ -684,28 +965,60 @@ class AMC_Admin {
 
 	private static function render_albums() {
 		$albums = AMC_Admin_Data::albums();
+		$id     = isset( $_GET['album_id'] ) ? absint( wp_unslash( $_GET['album_id'] ) ) : 0;
+		$album  = $id ? AMC_DB::get_row( 'albums', $id ) : null;
+		$album  = $album ? $album : array(
+			'id'           => 0,
+			'title'        => '',
+			'slug'         => '',
+			'artist_id'    => 0,
+			'cover_image'  => '',
+			'release_date' => '',
+			'release_year' => '',
+			'track_list'   => '',
+			'genre'        => '',
+			'label'        => '',
+			'description'  => '',
+			'gradient'     => 'ocean',
+			'status'       => 'active',
+		);
 		echo '<section class="amc-admin-grid amc-admin-grid--split">';
 		self::render_panel_start( 'Album editor', 'Manage album title, artist, track list, genre, label, cover art, and release state.' );
-		self::render_form(
+		self::open_form(
+			'save_entity',
 			array(
-				'Album title' => 'Noor Nights',
-				'Slug' => 'noor-nights',
-				'Artist' => 'Nancy Ajram',
-				'Cover art' => 'Artwork picker placeholder',
-				'Release date' => '2026-02-01',
-				'Track list' => '13 tracks seeded',
-				'Genre' => 'Pop',
-				'Label' => 'Kontentainment Music',
-				'Active / Hidden' => 'Active',
+				'entity' => 'album',
+				'id'     => $album['id'],
 			)
 		);
+		echo '<div class="amc-admin-form">';
+		self::field_input( 'Album title', 'title', $album['title'] );
+		self::field_input( 'Slug', 'slug', $album['slug'] );
+		self::field_select( 'Artist', 'artist_id', $album['artist_id'], self::artist_options() );
+		self::field_input( 'Cover art', 'cover_image', $album['cover_image'] );
+		self::field_input( 'Release date', 'release_date', $album['release_date'], 'date' );
+		self::field_input( 'Release year', 'release_year', $album['release_year'] );
+		self::field_textarea( 'Track list', 'track_list', $album['track_list'] );
+		self::field_input( 'Genre', 'genre', $album['genre'] );
+		self::field_input( 'Label', 'label', $album['label'] );
+		self::field_textarea( 'Description', 'description', $album['description'] );
+		self::field_select( 'Gradient', 'gradient', $album['gradient'], self::gradient_options() );
+		self::field_select( 'Active / Hidden', 'status', $album['status'], array( 'active' => 'Active', 'hidden' => 'Hidden', 'archived' => 'Archived' ) );
+		echo '</div>';
+		self::submit_row( array( array( 'label' => $id ? 'Update album' : 'Create album', 'class' => 'button-primary' ) ) );
+		self::close_form();
 		self::render_panel_end();
 		self::render_panel_start( 'Album library', 'Seeded album records with release context and visibility.' );
 		self::render_table(
-			array( 'Title', 'Artist', 'Release date', 'Tracks', 'Genre', 'Label', 'Status' ),
+			array( 'Title', 'Artist', 'Release date', 'Tracks', 'Genre', 'Label', 'Status', 'Actions' ),
 			array_map(
 				function ( $row ) {
-					return array( $row['title'], $row['artist'], $row['release_date'], (string) $row['tracks'], $row['genre'], $row['label'], $row['status'] );
+					$actions = array(
+						'<a href="' . esc_url( add_query_arg( 'album_id', $row['id'], self::current_url() ) ) . '">Edit</a>',
+						'<a href="' . esc_url( self::action_url( 'album', $row['id'], 'archived' === $row['raw_status'] ? 'restore' : 'archive' ) ) . '">' . esc_html( 'archived' === $row['raw_status'] ? 'Restore' : 'Archive' ) . '</a>',
+						'<a href="' . esc_url( self::action_url( 'album', $row['id'], 'delete' ) ) . '">Delete</a>',
+					);
+					return array( $row['title'], $row['artist'], $row['release_date'], (string) $row['tracks'], $row['genre'], $row['label'], $row['status'], array( 'value' => implode( ' / ', $actions ), 'html' => true ) );
 				},
 				$albums
 			)
@@ -716,67 +1029,120 @@ class AMC_Admin {
 
 	private static function render_uploads() {
 		$uploads = AMC_Admin_Data::uploads();
+		$preview_upload_id = isset( $_GET['upload_id'] ) ? absint( wp_unslash( $_GET['upload_id'] ) ) : 0;
+		$preview_rows      = $preview_upload_id ? AMC_Ingestion::preview_rows( $preview_upload_id, 8 ) : array();
 		echo '<section class="amc-admin-grid amc-admin-grid--split">';
-		self::render_panel_start( 'Source upload intake', 'UI-only placeholder for file ingestion across Spotify, YouTube Music, Apple Music, Anghami, TikTok, and Shazam.' );
-		self::render_form(
-			array(
-				'Source name' => 'Spotify',
-				'Upload file' => 'CSV / XLSX field placeholder',
-				'Chart week' => '2026-03-20',
-				'File status' => 'Pending',
-				'Row count' => 'Auto-detect later',
-				'Preview' => 'Generated after parse',
-				'Uploader' => wp_get_current_user()->display_name ? wp_get_current_user()->display_name : 'Current user',
-			)
-		);
-		self::render_button_row( array( 'Upload source sheet', 'Generate preview', 'Discard batch' ) );
+		self::render_panel_start( 'Source upload intake', 'Real upload records now persist with file metadata, parsing state, and preview rows.' );
+		self::open_form( 'upload_source', array(), array( 'enctype' => 'multipart/form-data' ) );
+		echo '<div class="amc-admin-form">';
+		self::field_select( 'Source name', 'source_name', 'Spotify', array( 'Spotify' => 'Spotify', 'YouTube Music' => 'YouTube Music', 'Apple Music' => 'Apple Music', 'Anghami' => 'Anghami', 'TikTok' => 'TikTok', 'Shazam' => 'Shazam' ) );
+		self::field_input( 'Chart week', 'chart_week', current_time( 'Y-m-d' ), 'date' );
+		echo '<label><span>Upload file</span><input type="file" name="source_file" accept=".csv,.tsv,.txt,.xlsx,.xls"></label>';
+		echo '<label><span>Uploader</span><input type="text" value="' . esc_attr( wp_get_current_user()->display_name ? wp_get_current_user()->display_name : 'Current user' ) . '" readonly></label>';
+		echo '</div>';
+		self::submit_row( array( array( 'label' => 'Upload source sheet', 'class' => 'button-primary' ) ) );
+		self::close_form();
 		self::render_panel_end();
 		self::render_panel_start( 'Recent source uploads', 'Operational view of incoming chart source sheets.' );
 		self::render_table(
-			array( 'Source', 'Upload date', 'Chart week', 'Status', 'Rows', 'Preview', 'Uploader' ),
+			array( 'Source', 'Upload date', 'Chart week', 'Status', 'Rows', 'Preview', 'Uploader', 'Actions' ),
 			array_map(
 				function ( $row ) {
-					return array( $row['source'], $row['upload_date'], $row['week'], $row['status'], (string) $row['row_count'], $row['preview'], $row['uploader'] );
+					$actions = array(
+						'<a href="' . esc_url( add_query_arg( 'upload_id', $row['id'], self::current_url() ) ) . '">Preview</a>',
+						'<a href="' . esc_url( self::action_url( 'upload', $row['id'], 'parse' ) ) . '">Reparse</a>',
+						'<a href="' . esc_url( self::action_url( 'upload', $row['id'], 'match' ) ) . '">Run matching</a>',
+						'<a href="' . esc_url( self::action_url( 'upload', $row['id'], 'delete' ) ) . '">Delete</a>',
+					);
+					if ( ! empty( $row['file_url'] ) ) {
+						$actions[] = '<a href="' . esc_url( $row['file_url'] ) . '" target="_blank" rel="noreferrer">File</a>';
+					}
+					return array( $row['source'], $row['upload_date'], $row['week'], $row['status'], (string) $row['row_count'], $row['preview'], $row['uploader'], array( 'value' => implode( ' / ', $actions ), 'html' => true ) );
 				},
 				$uploads
 			)
 		);
+		if ( $preview_upload_id ) {
+			if ( $preview_rows ) {
+				echo '<div class="amc-admin-definition-list">';
+				foreach ( $preview_rows as $preview_row ) {
+					printf(
+						'<div><strong>%1$s</strong><span>%2$s | %3$s | rank %4$s</span></div>',
+						esc_html( $preview_row['normalized_title'] ? $preview_row['normalized_title'] : 'Untitled row' ),
+						esc_html( $preview_row['normalized_artist'] ),
+						esc_html( $preview_row['normalized_album'] ),
+						esc_html( (string) $preview_row['normalized_rank'] )
+					);
+				}
+				echo '</div>';
+			} else {
+				echo '<p>No parsed preview rows are available for this upload yet.</p>';
+			}
+		}
 		self::render_panel_end();
 		echo '</section>';
 	}
 
 	private static function render_cleaning() {
 		$candidates = AMC_Admin_Data::matching_candidates();
+		$override_id = isset( $_GET['queue_id'] ) ? absint( wp_unslash( $_GET['queue_id'] ) ) : 0;
+		$override    = $override_id ? AMC_DB::get_row( 'matching_queue', $override_id ) : null;
 		echo '<section class="amc-admin-grid amc-admin-grid--split">';
-		self::render_panel_start( 'Duplicate and similarity queue', 'Approve or reject matches, then apply manual merges and overrides in later phases.' );
+		self::render_panel_start( 'Duplicate and similarity queue', 'Approve, reject, or override persisted matching candidates generated from real upload rows.' );
 		self::render_table(
-			array( 'Candidate', 'Type', 'Confidence', 'Sources', 'Status' ),
+			array( 'Candidate', 'Type', 'Confidence', 'Sources', 'Status', 'Actions' ),
 			array_map(
 				function ( $row ) {
-					return array( $row['candidate'], $row['type'], $row['confidence'], $row['sources'], $row['status'] );
+					$actions = array(
+						'<a href="' . esc_url( self::action_url( 'matching', $row['id'], 'approve' ) ) . '">Approve</a>',
+						'<a href="' . esc_url( self::action_url( 'matching', $row['id'], 'reject' ) ) . '">Reject</a>',
+						'<a href="' . esc_url( add_query_arg( 'queue_id', $row['id'], self::current_url() ) ) . '">Override</a>',
+					);
+					return array( $row['candidate'], $row['type'], $row['confidence'], $row['sources'], $row['status'], array( 'value' => implode( ' / ', $actions ), 'html' => true ) );
 				},
 				$candidates
 			)
 		);
-		self::render_button_row( array( 'Approve selected', 'Reject selected', 'Open manual merge tool' ) );
 		self::render_panel_end();
-		self::render_panel_start( 'Manual override tools', 'Placeholder controls for merge, split, and source-priority overrides.' );
-		self::render_form(
+		self::render_panel_start( 'Manual override tools', 'Manual override decisions now persist to the matching queue and source row records.' );
+		self::open_form(
+			'row_action',
 			array(
-				'Primary record' => 'Select track or artist',
-				'Secondary record' => 'Select duplicate candidate',
-				'Override reason' => 'Regional title variant / metadata mismatch',
-				'Resulting slug' => 'auto-generated later',
+				'entity' => 'matching',
+				'id'     => $override ? (int) $override['id'] : 0,
+				'task'   => 'override',
 			)
 		);
+		echo '<div class="amc-admin-form">';
+		self::field_input( 'Queue item ID', 'id_display', $override ? (string) $override['id'] : '', 'text' );
+		self::field_select( 'Entity type', 'override_entity_type', $override ? $override['entity_type'] : 'track', array( 'track' => 'Track', 'artist' => 'Artist', 'album' => 'Album' ) );
+		self::field_select( 'Target record', 'override_entity_id', $override ? (int) $override['candidate_entity_id'] : 0, self::merged_entity_options() );
+		self::field_textarea( 'Override reason', 'notes', $override ? $override['notes'] : 'Regional title variant / metadata mismatch' );
+		echo '</div>';
+		self::submit_row( array( array( 'label' => 'Save override', 'class' => 'button-primary' ) ) );
+		self::close_form();
 		self::render_panel_end();
 		echo '</section>';
 	}
 
 	private static function render_scoring() {
 		$data = AMC_Admin_Data::scoring();
+		$methodology_keys = array(
+			'Minimum Release Age'       => 'minimum_release_age',
+			'Minimum Source Coverage'   => 'minimum_source_coverage',
+			'Manual Editorial Override' => 'manual_editorial_override',
+			'Catalog Reentry Threshold' => 'catalog_reentry_threshold',
+		);
 		echo '<section class="amc-admin-grid amc-admin-grid--split">';
-		self::render_panel_start( 'Source weights', 'Configure chart source weighting before future scoring automation is wired in.' );
+		self::render_panel_start( 'Source weights', 'Scoring weights now persist to the scoring rules table and prepare the next generation layer.' );
+		self::open_form( 'save_scoring' );
+		echo '<div class="amc-admin-form">';
+		foreach ( $data['weights'] as $row ) {
+			self::field_input( $row['source'], $row['key'], $row['value'], 'number' );
+		}
+		echo '</div>';
+		self::submit_row( array( array( 'label' => 'Save methodology draft', 'class' => 'button-primary' ) ) );
+		self::close_form();
 		self::render_table(
 			array( 'Source', 'Weight' ),
 			array_map(
@@ -786,9 +1152,17 @@ class AMC_Admin {
 				$data['weights']
 			)
 		);
-		self::render_button_row( array( 'Save methodology draft', 'Reset weights', 'Duplicate ruleset' ) );
 		self::render_panel_end();
-		self::render_panel_start( 'Methodology rules', 'Eligibility conditions and override policy placeholders.' );
+		self::render_panel_start( 'Methodology rules', 'Methodology values are now real persisted records ready for chart generation in the next phase.' );
+		self::open_form( 'save_scoring' );
+		echo '<div class="amc-admin-form">';
+		foreach ( $methodology_keys as $label => $key ) {
+			$value = isset( $data['methodology'][ $label ] ) ? $data['methodology'][ $label ] : '';
+			self::field_textarea( $label, $key, $value );
+		}
+		echo '</div>';
+		self::submit_row( array( array( 'label' => 'Save methodology rules', 'class' => 'button-primary' ) ) );
+		self::close_form();
 		echo '<div class="amc-admin-definition-list">';
 		foreach ( $data['methodology'] as $label => $value ) {
 			printf( '<div><strong>%1$s</strong><span>%2$s</span></div>', esc_html( $label ), esc_html( $value ) );
@@ -800,6 +1174,8 @@ class AMC_Admin {
 
 	private static function render_publishing() {
 		$data = AMC_Admin_Data::publishing_preview();
+		$weeks = AMC_DB::get_chart_weeks();
+		$week  = ! empty( $weeks[0] ) ? $weeks[0] : null;
 		echo '<section class="amc-admin-grid amc-admin-grid--split">';
 		self::render_panel_start( 'Publishing preview', 'Preview generated chart weeks, compare against previous periods, and control publication state.' );
 		printf( '<div class="amc-admin-publish-week"><strong>%s</strong><span>Preview state only</span></div>', esc_html( $data['current_week'] ) );
@@ -809,8 +1185,16 @@ class AMC_Admin {
 		}
 		echo '</div>';
 		self::render_panel_end();
-		self::render_panel_start( 'Publishing actions', 'UI placeholders for publish, unpublish, compare, and feature states.' );
-		self::render_button_row( $data['actions'] );
+		self::render_panel_start( 'Publishing actions', 'Publishing, unpublishing, and featuring chart weeks now update the real chart_weeks table.' );
+		if ( $week ) {
+			echo '<div class="amc-admin-button-row">';
+			echo '<a class="button button-primary" href="' . esc_url( self::action_url( 'week', (int) $week['id'], 'published' === $week['status'] ? 'unpublish' : 'publish' ) ) . '">' . esc_html( 'published' === $week['status'] ? 'Unpublish week' : 'Publish week' ) . '</a>';
+			echo '<a class="button button-secondary" href="' . esc_url( self::action_url( 'week', (int) $week['id'], 'archive' ) ) . '">Archive week</a>';
+			echo '<a class="button button-secondary" href="' . esc_url( self::action_url( 'week', (int) $week['id'], ! empty( $week['is_featured'] ) ? 'unfeature' : 'feature' ) ) . '">' . esc_html( ! empty( $week['is_featured'] ) ? 'Unfeature week' : 'Feature on homepage' ) . '</a>';
+			echo '</div>';
+		} else {
+			echo '<p>No chart week is available for publishing yet.</p>';
+		}
 		self::render_panel_end();
 		echo '</section>';
 	}
@@ -819,10 +1203,14 @@ class AMC_Admin {
 		$archives = AMC_Admin_Data::archives();
 		self::render_panel_start( 'Archive management', 'Past chart weeks can be reopened, restored, or re-frozen from this control panel UI.' );
 		self::render_table(
-			array( 'Week', 'Charts', 'Status', 'Notes', 'Actions' ),
+			array( 'Week', 'Chart', 'Status', 'Notes', 'Actions' ),
 			array_map(
 				function ( $row ) {
-					return array( $row['week'], (string) $row['charts'], $row['status'], $row['notes'], $row['actions'] );
+					$actions = array(
+						'<a href="' . esc_url( add_query_arg( 'week_id', $row['id'], AMC_Admin_Data::custom_dashboard_url( 'weekly-entries' ) ) ) . '">Open week</a>',
+						'<a href="' . esc_url( self::action_url( 'week', $row['id'], 'Archived' === $row['status'] ? 'restore' : 'archive' ) ) . '">' . esc_html( 'Archived' === $row['status'] ? 'Restore' : 'Archive' ) . '</a>',
+					);
+					return array( $row['week'], $row['chart'], $row['status'], $row['notes'], array( 'value' => implode( ' / ', $actions ), 'html' => true ) );
 				},
 				$archives
 			)
@@ -859,17 +1247,29 @@ class AMC_Admin {
 	}
 
 	private static function render_settings() {
-		$settings = AMC_Admin_Data::settings();
+		$settings = AMC_DB::get_settings();
 		echo '<section class="amc-admin-grid amc-admin-grid--split">';
-		self::render_panel_start( 'Platform settings', 'Brand, SEO, homepage, methodology, and localization controls reserved for future persistence.' );
-		self::render_form( $settings );
-		self::render_button_row( array( 'Save settings', 'Reset defaults', 'Generate preview' ) );
+		self::render_panel_start( 'Platform settings', 'Brand, SEO, homepage, methodology, and localization controls now persist to the plugin settings table.' );
+		self::open_form( 'save_settings' );
+		echo '<div class="amc-admin-form">';
+		self::field_input( 'Platform name', 'platform_name', $settings['platform_name'] );
+		self::field_input( 'Logo', 'logo', $settings['logo'] );
+		self::field_input( 'SEO defaults', 'seo_defaults', $settings['seo_defaults'] );
+		self::field_input( 'Social image', 'social_image', $settings['social_image'] );
+		self::field_select( 'Homepage chart', 'homepage_chart', $settings['homepage_chart'], self::chart_slug_options() );
+		self::field_textarea( 'Methodology text', 'methodology_text', $settings['methodology_text'] );
+		self::field_input( 'Language', 'language', $settings['language'] );
+		self::field_input( 'Date format', 'date_format', $settings['date_format'] );
+		echo '</div>';
+		self::submit_row( array( array( 'label' => 'Save settings', 'class' => 'button-primary' ) ) );
+		self::close_form();
 		self::render_panel_end();
 		self::render_panel_start( 'Settings summary', 'Current seeded defaults displayed for interface planning.' );
 		echo '<div class="amc-admin-definition-list">';
-		foreach ( $settings as $label => $value ) {
-			printf( '<div><strong>%1$s</strong><span>%2$s</span></div>', esc_html( $label ), esc_html( $value ) );
-		}
+		printf( '<div><strong>Platform name</strong><span>%s</span></div>', esc_html( $settings['platform_name'] ) );
+		printf( '<div><strong>Homepage chart</strong><span>%s</span></div>', esc_html( $settings['homepage_chart'] ) );
+		printf( '<div><strong>Language</strong><span>%s</span></div>', esc_html( $settings['language'] ) );
+		printf( '<div><strong>Date format</strong><span>%s</span></div>', esc_html( $settings['date_format'] ) );
 		echo '</div>';
 		self::render_panel_end();
 		echo '</section>';
@@ -893,10 +1293,17 @@ class AMC_Admin {
 			printf( '<th>%s</th>', esc_html( $header ) );
 		}
 		echo '</tr></thead><tbody>';
+		if ( empty( $rows ) ) {
+			echo '<tr><td colspan="' . esc_attr( count( $headers ) ) . '">No records are available yet.</td></tr>';
+		}
 		foreach ( $rows as $row ) {
 			echo '<tr>';
 			foreach ( $row as $cell ) {
-				printf( '<td>%s</td>', esc_html( $cell ) );
+				if ( is_array( $cell ) && ! empty( $cell['html'] ) ) {
+					printf( '<td>%s</td>', $cell['value'] ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+				} else {
+					printf( '<td>%s</td>', esc_html( is_array( $cell ) && isset( $cell['value'] ) ? $cell['value'] : $cell ) );
+				}
 			}
 			echo '</tr>';
 		}
@@ -922,6 +1329,697 @@ class AMC_Admin {
 			printf( '<button type="button" class="button %1$s">%2$s</button>', esc_attr( $class ), esc_html( $label ) );
 		}
 		echo '</div>';
+	}
+
+	/**
+	 * Open a real admin-post form.
+	 *
+	 * @param string $action Action.
+	 * @param array  $hidden Hidden values.
+	 * @return void
+	 */
+	private static function open_form( $action, $hidden = array(), $args = array() ) {
+		$enctype = ! empty( $args['enctype'] ) ? ' enctype="' . esc_attr( $args['enctype'] ) . '"' : '';
+		echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '"' . $enctype . '>';
+		wp_nonce_field( 'amc_' . $action );
+		echo '<input type="hidden" name="action" value="' . esc_attr( 'amc_' . $action ) . '">';
+		echo '<input type="hidden" name="redirect_to" value="' . esc_attr( self::current_url() ) . '">';
+
+		foreach ( $hidden as $name => $value ) {
+			echo '<input type="hidden" name="' . esc_attr( $name ) . '" value="' . esc_attr( $value ) . '">';
+		}
+	}
+
+	/**
+	 * Close form.
+	 *
+	 * @return void
+	 */
+	private static function close_form() {
+		echo '</form>';
+	}
+
+	/**
+	 * Current request url.
+	 *
+	 * @return string
+	 */
+	private static function current_url() {
+		$request_uri = isset( $_SERVER['REQUEST_URI'] ) ? wp_unslash( $_SERVER['REQUEST_URI'] ) : '';
+		return home_url( $request_uri );
+	}
+
+	/**
+	 * Render text-like field.
+	 *
+	 * @param string $label Label.
+	 * @param string $name Name.
+	 * @param string $value Value.
+	 * @param string $type Input type.
+	 * @return void
+	 */
+	private static function field_input( $label, $name, $value = '', $type = 'text' ) {
+		echo '<label><span>' . esc_html( $label ) . '</span><input type="' . esc_attr( $type ) . '" name="' . esc_attr( $name ) . '" value="' . esc_attr( $value ) . '"></label>';
+	}
+
+	/**
+	 * Render textarea field.
+	 *
+	 * @param string $label Label.
+	 * @param string $name Name.
+	 * @param string $value Value.
+	 * @return void
+	 */
+	private static function field_textarea( $label, $name, $value = '' ) {
+		echo '<label><span>' . esc_html( $label ) . '</span><textarea name="' . esc_attr( $name ) . '" rows="4">' . esc_textarea( $value ) . '</textarea></label>';
+	}
+
+	/**
+	 * Render select field.
+	 *
+	 * @param string $label Label.
+	 * @param string $name Name.
+	 * @param string $value Current value.
+	 * @param array  $options Options.
+	 * @return void
+	 */
+	private static function field_select( $label, $name, $value, $options ) {
+		echo '<label><span>' . esc_html( $label ) . '</span><select name="' . esc_attr( $name ) . '">';
+		foreach ( $options as $option_value => $option_label ) {
+			echo '<option value="' . esc_attr( $option_value ) . '"' . selected( (string) $value, (string) $option_value, false ) . '>' . esc_html( $option_label ) . '</option>';
+		}
+		echo '</select></label>';
+	}
+
+	/**
+	 * Render checkbox field.
+	 *
+	 * @param string $label Label.
+	 * @param string $name Name.
+	 * @param bool   $checked Checked state.
+	 * @return void
+	 */
+	private static function field_checkbox( $label, $name, $checked ) {
+		echo '<label><span>' . esc_html( $label ) . '</span><input type="checkbox" name="' . esc_attr( $name ) . '" value="1"' . checked( $checked, true, false ) . '></label>';
+	}
+
+	/**
+	 * Render submit row.
+	 *
+	 * @param array $buttons Button definitions.
+	 * @return void
+	 */
+	private static function submit_row( $buttons ) {
+		echo '<div class="amc-admin-button-row">';
+		foreach ( $buttons as $button ) {
+			$type  = ! empty( $button['type'] ) ? $button['type'] : 'submit';
+			$class = ! empty( $button['class'] ) ? $button['class'] : 'button-secondary';
+			$name  = ! empty( $button['name'] ) ? $button['name'] : '';
+			$value = ! empty( $button['value'] ) ? $button['value'] : '';
+			echo '<button type="' . esc_attr( $type ) . '" class="button ' . esc_attr( $class ) . '"' . ( $name ? ' name="' . esc_attr( $name ) . '"' : '' ) . ( $value ? ' value="' . esc_attr( $value ) . '"' : '' ) . '>' . esc_html( $button['label'] ) . '</button>';
+		}
+		echo '</div>';
+	}
+
+	/**
+	 * Build action url.
+	 *
+	 * @param string $entity Entity.
+	 * @param int    $id Record id.
+	 * @param string $task Task.
+	 * @return string
+	 */
+	private static function action_url( $entity, $id, $task ) {
+		return wp_nonce_url(
+			add_query_arg(
+				array(
+					'action'      => 'amc_row_action',
+					'entity'      => $entity,
+					'id'          => absint( $id ),
+					'task'        => $task,
+					'redirect_to' => self::current_url(),
+				),
+				admin_url( 'admin-post.php' )
+			),
+			'amc_row_action'
+		);
+	}
+
+	/**
+	 * Chart options.
+	 *
+	 * @return array
+	 */
+	private static function chart_options() {
+		$options = array();
+
+		foreach ( AMC_DB::get_rows( 'charts', array( 'order_by' => 'display_order ASC, id ASC' ) ) as $chart ) {
+			$options[ $chart['id'] ] = $chart['name'];
+		}
+
+		return $options;
+	}
+
+	/**
+	 * Chart slug options.
+	 *
+	 * @return array
+	 */
+	private static function chart_slug_options() {
+		$options = array();
+
+		foreach ( AMC_DB::get_rows( 'charts', array( 'order_by' => 'display_order ASC, id ASC' ) ) as $chart ) {
+			$options[ $chart['slug'] ] = $chart['name'];
+		}
+
+		return $options;
+	}
+
+	/**
+	 * Artist options.
+	 *
+	 * @return array
+	 */
+	private static function artist_options() {
+		$options = array( 0 => 'Select artist' );
+
+		foreach ( AMC_DB::get_rows( 'artists', array( 'order_by' => 'name ASC' ) ) as $artist ) {
+			$options[ $artist['id'] ] = $artist['name'];
+		}
+
+		return $options;
+	}
+
+	/**
+	 * Album options.
+	 *
+	 * @param bool $include_empty Include empty option.
+	 * @return array
+	 */
+	private static function album_options( $include_empty = false ) {
+		$options = $include_empty ? array( 0 => 'Standalone / None' ) : array();
+
+		foreach ( AMC_DB::get_rows( 'albums', array( 'order_by' => 'title ASC' ) ) as $album ) {
+			$options[ $album['id'] ] = $album['title'];
+		}
+
+		return $options;
+	}
+
+	/**
+	 * Entity options by type.
+	 *
+	 * @param string $type Entity type.
+	 * @return array
+	 */
+	private static function entity_options_for_type( $type ) {
+		$options = array( 0 => 'Select item' );
+		$table   = 'tracks';
+		$field   = 'title';
+
+		if ( 'artist' === $type ) {
+			$table = 'artists';
+			$field = 'name';
+		} elseif ( 'album' === $type ) {
+			$table = 'albums';
+			$field = 'title';
+		}
+
+		foreach ( AMC_DB::get_rows( $table, array( 'order_by' => $field . ' ASC' ) ) as $row ) {
+			$options[ $row['id'] ] = $row[ $field ];
+		}
+
+		return $options;
+	}
+
+	/**
+	 * Gradient options.
+	 *
+	 * @return array
+	 */
+	private static function gradient_options() {
+		return array(
+			'sunset'  => 'Sunset',
+			'ocean'   => 'Ocean',
+			'ruby'    => 'Ruby',
+			'plum'    => 'Plum',
+			'gold'    => 'Gold',
+			'emerald' => 'Emerald',
+			'ice'     => 'Ice',
+			'rose'    => 'Rose',
+		);
+	}
+
+	/**
+	 * Combined entity options for override UI.
+	 *
+	 * @return array
+	 */
+	private static function merged_entity_options() {
+		$options = array( 0 => 'Select target record' );
+
+		foreach ( AMC_DB::get_rows( 'tracks', array( 'order_by' => 'title ASC' ) ) as $row ) {
+			$options[ $row['id'] ] = '[Track] ' . $row['title'];
+		}
+
+		foreach ( AMC_DB::get_rows( 'artists', array( 'order_by' => 'name ASC' ) ) as $row ) {
+			$options[ $row['id'] ] = '[Artist] ' . $row['name'];
+		}
+
+		foreach ( AMC_DB::get_rows( 'albums', array( 'order_by' => 'title ASC' ) ) as $row ) {
+			$options[ $row['id'] ] = '[Album] ' . $row['title'];
+		}
+
+		return $options;
+	}
+
+	/**
+	 * Handle entity save requests.
+	 *
+	 * @return void
+	 */
+	public static function handle_save_entity() {
+		if ( ! current_user_can( 'amc_view_dashboard' ) ) {
+			wp_die( esc_html__( 'You do not have permission to save Kontentainment Charts data.', 'arabic-music-charts' ) );
+		}
+
+		check_admin_referer( 'amc_save_entity' );
+
+		$entity   = isset( $_POST['entity'] ) ? sanitize_key( wp_unslash( $_POST['entity'] ) ) : '';
+		$redirect = self::posted_redirect();
+		$id       = isset( $_POST['id'] ) ? absint( wp_unslash( $_POST['id'] ) ) : 0;
+
+		switch ( $entity ) {
+			case 'chart':
+				self::assert_cap( 'amc_manage_charts' );
+				$id = AMC_DB::save_row(
+					'charts',
+					array(
+						'name'             => sanitize_text_field( wp_unslash( $_POST['name'] ) ),
+						'slug'             => sanitize_title( wp_unslash( $_POST['slug'] ) ),
+						'description'      => sanitize_textarea_field( wp_unslash( $_POST['description'] ) ),
+						'type'             => sanitize_key( wp_unslash( $_POST['type'] ) ),
+						'cover_image'      => esc_url_raw( wp_unslash( $_POST['cover_image'] ) ),
+						'display_order'    => absint( wp_unslash( $_POST['display_order'] ) ),
+						'status'           => ! empty( $_POST['status'] ) ? sanitize_key( wp_unslash( $_POST['status'] ) ) : 'hidden',
+						'is_featured_home' => empty( $_POST['is_featured_home'] ) ? 0 : 1,
+						'archive_enabled'  => empty( $_POST['archive_enabled'] ) ? 0 : 1,
+						'accent'           => sanitize_key( wp_unslash( $_POST['accent'] ) ),
+						'kicker'           => sanitize_text_field( wp_unslash( $_POST['kicker'] ) ),
+					),
+					$id
+				);
+				if ( ! $id ) {
+					self::redirect_notice( $redirect, 'error', 'Chart could not be saved. Check slug uniqueness.' );
+				}
+				self::redirect_notice( add_query_arg( 'chart_id', $id, $redirect ), 'success', 'Chart saved successfully.' );
+				break;
+
+			case 'track':
+				self::assert_cap( 'amc_manage_library' );
+				$id = AMC_DB::save_row(
+					'tracks',
+					array(
+						'title'        => sanitize_text_field( wp_unslash( $_POST['title'] ) ),
+						'slug'         => sanitize_title( wp_unslash( $_POST['slug'] ) ),
+						'cover_image'  => esc_url_raw( wp_unslash( $_POST['cover_image'] ) ),
+						'artist_id'    => absint( wp_unslash( $_POST['artist_id'] ) ),
+						'album_id'     => absint( wp_unslash( $_POST['album_id'] ) ),
+						'isrc'         => sanitize_text_field( wp_unslash( $_POST['isrc'] ) ),
+						'aliases'      => sanitize_text_field( wp_unslash( $_POST['aliases'] ) ),
+						'release_date' => sanitize_text_field( wp_unslash( $_POST['release_date'] ) ),
+						'genre'        => sanitize_text_field( wp_unslash( $_POST['genre'] ) ),
+						'duration'     => sanitize_text_field( wp_unslash( $_POST['duration'] ) ),
+						'description'  => sanitize_textarea_field( wp_unslash( $_POST['description'] ) ),
+						'gradient'     => sanitize_key( wp_unslash( $_POST['gradient'] ) ),
+						'status'       => sanitize_key( wp_unslash( $_POST['status'] ) ),
+					),
+					$id
+				);
+				if ( ! $id ) {
+					self::redirect_notice( $redirect, 'error', 'Track could not be saved.' );
+				}
+				self::redirect_notice( add_query_arg( 'track_id', $id, $redirect ), 'success', 'Track saved successfully.' );
+				break;
+
+			case 'artist':
+				self::assert_cap( 'amc_manage_library' );
+				$id = AMC_DB::save_row(
+					'artists',
+					array(
+						'name'              => sanitize_text_field( wp_unslash( $_POST['name'] ) ),
+						'slug'              => sanitize_title( wp_unslash( $_POST['slug'] ) ),
+						'image'             => esc_url_raw( wp_unslash( $_POST['image'] ) ),
+						'bio'               => sanitize_textarea_field( wp_unslash( $_POST['bio'] ) ),
+						'country'           => sanitize_text_field( wp_unslash( $_POST['country'] ) ),
+						'genre'             => sanitize_text_field( wp_unslash( $_POST['genre'] ) ),
+						'social_links'      => sanitize_text_field( wp_unslash( $_POST['social_links'] ) ),
+						'monthly_listeners' => sanitize_text_field( wp_unslash( $_POST['monthly_listeners'] ) ),
+						'chart_streak'      => sanitize_text_field( wp_unslash( $_POST['chart_streak'] ) ),
+						'gradient'          => sanitize_key( wp_unslash( $_POST['gradient'] ) ),
+						'status'            => sanitize_key( wp_unslash( $_POST['status'] ) ),
+						'blurb'             => sanitize_text_field( wp_unslash( $_POST['blurb'] ) ),
+					),
+					$id
+				);
+				if ( ! $id ) {
+					self::redirect_notice( $redirect, 'error', 'Artist could not be saved.' );
+				}
+				self::redirect_notice( add_query_arg( 'artist_id', $id, $redirect ), 'success', 'Artist saved successfully.' );
+				break;
+
+			case 'album':
+				self::assert_cap( 'amc_manage_library' );
+				$id = AMC_DB::save_row(
+					'albums',
+					array(
+						'title'        => sanitize_text_field( wp_unslash( $_POST['title'] ) ),
+						'slug'         => sanitize_title( wp_unslash( $_POST['slug'] ) ),
+						'artist_id'    => absint( wp_unslash( $_POST['artist_id'] ) ),
+						'cover_image'  => esc_url_raw( wp_unslash( $_POST['cover_image'] ) ),
+						'release_date' => sanitize_text_field( wp_unslash( $_POST['release_date'] ) ),
+						'release_year' => sanitize_text_field( wp_unslash( $_POST['release_year'] ) ),
+						'track_list'   => sanitize_textarea_field( wp_unslash( $_POST['track_list'] ) ),
+						'genre'        => sanitize_text_field( wp_unslash( $_POST['genre'] ) ),
+						'label'        => sanitize_text_field( wp_unslash( $_POST['label'] ) ),
+						'description'  => sanitize_textarea_field( wp_unslash( $_POST['description'] ) ),
+						'gradient'     => sanitize_key( wp_unslash( $_POST['gradient'] ) ),
+						'status'       => sanitize_key( wp_unslash( $_POST['status'] ) ),
+					),
+					$id
+				);
+				if ( ! $id ) {
+					self::redirect_notice( $redirect, 'error', 'Album could not be saved.' );
+				}
+				self::redirect_notice( add_query_arg( 'album_id', $id, $redirect ), 'success', 'Album saved successfully.' );
+				break;
+
+			case 'week':
+				self::assert_cap( 'amc_manage_weeks' );
+				$week_status = sanitize_key( wp_unslash( $_POST['status'] ) );
+				if ( in_array( $week_status, array( 'published', 'archived' ), true ) ) {
+					self::assert_cap( 'amc_publish_charts' );
+				}
+				$id = AMC_DB::save_row(
+					'chart_weeks',
+					array(
+						'chart_id'     => absint( wp_unslash( $_POST['chart_id'] ) ),
+						'week_date'    => sanitize_text_field( wp_unslash( $_POST['week_date'] ) ),
+						'status'       => $week_status,
+						'is_featured'  => empty( $_POST['is_featured'] ) ? 0 : 1,
+						'notes'        => sanitize_textarea_field( wp_unslash( $_POST['notes'] ) ),
+						'published_at' => 'published' === $week_status ? current_time( 'mysql' ) : null,
+						'archived_at'  => 'archived' === $week_status ? current_time( 'mysql' ) : null,
+					),
+					$id
+				);
+				if ( ! $id ) {
+					self::redirect_notice( $redirect, 'error', 'Chart week could not be saved. Check for duplicate chart/date combinations.' );
+				}
+				self::redirect_notice( add_query_arg( 'week_id', $id, $redirect ), 'success', 'Chart week saved successfully.' );
+				break;
+
+			case 'entry':
+				self::assert_cap( 'amc_manage_weeks' );
+				$id = AMC_DB::save_row(
+					'chart_entries',
+					array(
+						'chart_week_id'  => absint( wp_unslash( $_POST['chart_week_id'] ) ),
+						'entity_type'    => sanitize_key( wp_unslash( $_POST['entity_type'] ) ),
+						'entity_id'      => absint( wp_unslash( $_POST['entity_id'] ) ),
+						'current_rank'   => absint( wp_unslash( $_POST['current_rank'] ) ),
+						'previous_rank'  => absint( wp_unslash( $_POST['previous_rank'] ) ),
+						'peak_rank'      => absint( wp_unslash( $_POST['peak_rank'] ) ),
+						'weeks_on_chart' => absint( wp_unslash( $_POST['weeks_on_chart'] ) ),
+						'movement'       => sanitize_key( wp_unslash( $_POST['movement'] ) ),
+						'score'          => (float) wp_unslash( $_POST['score'] ),
+						'artwork'        => esc_url_raw( wp_unslash( $_POST['artwork'] ) ),
+					),
+					$id
+				);
+				if ( ! $id ) {
+					self::redirect_notice( $redirect, 'error', 'Chart entry could not be saved.' );
+				}
+				self::redirect_notice( add_query_arg( array( 'week_id' => absint( wp_unslash( $_POST['chart_week_id'] ) ), 'entry_id' => $id ), $redirect ), 'success', 'Chart entry saved successfully.' );
+				break;
+		}
+
+		self::redirect_notice( $redirect, 'error', 'Unsupported save request.' );
+	}
+
+	/**
+	 * Handle row actions.
+	 *
+	 * @return void
+	 */
+	public static function handle_row_action() {
+		if ( ! current_user_can( 'amc_view_dashboard' ) ) {
+			wp_die( esc_html__( 'You do not have permission to manage Kontentainment Charts records.', 'arabic-music-charts' ) );
+		}
+
+		check_admin_referer( 'amc_row_action' );
+
+		$entity   = isset( $_REQUEST['entity'] ) ? sanitize_key( wp_unslash( $_REQUEST['entity'] ) ) : '';
+		$task     = isset( $_REQUEST['task'] ) ? sanitize_key( wp_unslash( $_REQUEST['task'] ) ) : '';
+		$id       = isset( $_REQUEST['id'] ) ? absint( wp_unslash( $_REQUEST['id'] ) ) : 0;
+		$redirect = self::posted_redirect();
+
+		if ( ! $entity || ! $task || ! $id ) {
+			self::redirect_notice( $redirect, 'error', 'Missing action payload.' );
+		}
+
+		if ( in_array( $entity, array( 'track', 'artist', 'album' ), true ) ) {
+			self::assert_cap( 'amc_manage_library' );
+			$table = $entity . 's';
+
+			if ( 'delete' === $task ) {
+				global $wpdb;
+				$wpdb->delete(
+					AMC_DB::table( 'chart_entries' ),
+					array(
+						'entity_type' => $entity,
+						'entity_id'   => $id,
+					)
+				);
+				AMC_DB::delete_row( $table, $id );
+			} elseif ( 'archive' === $task ) {
+				AMC_DB::save_row( $table, array( 'status' => 'archived' ), $id );
+			} elseif ( 'restore' === $task ) {
+				AMC_DB::save_row( $table, array( 'status' => 'active' ), $id );
+			}
+
+			self::redirect_notice( $redirect, 'success', ucfirst( $entity ) . ' updated.' );
+		}
+
+		if ( 'chart' === $entity ) {
+			self::assert_cap( 'amc_manage_charts' );
+
+			if ( 'delete' === $task ) {
+				foreach ( AMC_DB::get_chart_weeks( array( 'chart_id' => $id ) ) as $week ) {
+					AMC_DB::delete_chart_week_entries( (int) $week['id'] );
+					AMC_DB::delete_row( 'chart_weeks', (int) $week['id'] );
+				}
+				AMC_DB::delete_row( 'charts', $id );
+			} elseif ( 'hide' === $task ) {
+				AMC_DB::save_row( 'charts', array( 'status' => 'hidden' ), $id );
+			} elseif ( 'activate' === $task ) {
+				AMC_DB::save_row( 'charts', array( 'status' => 'active' ), $id );
+			} elseif ( 'feature' === $task ) {
+				AMC_DB::save_row( 'charts', array( 'is_featured_home' => 1 ), $id );
+			} elseif ( 'unfeature' === $task ) {
+				AMC_DB::save_row( 'charts', array( 'is_featured_home' => 0 ), $id );
+			}
+
+			self::redirect_notice( $redirect, 'success', 'Chart updated.' );
+		}
+
+		if ( 'week' === $entity ) {
+			self::assert_cap( 'amc_manage_weeks' );
+			self::assert_cap( 'amc_publish_charts' );
+
+			if ( 'delete' === $task ) {
+				AMC_DB::delete_chart_week_entries( $id );
+				AMC_DB::delete_row( 'chart_weeks', $id );
+			} elseif ( 'publish' === $task ) {
+				AMC_DB::save_row( 'chart_weeks', array( 'status' => 'published', 'published_at' => current_time( 'mysql' ), 'archived_at' => null ), $id );
+			} elseif ( 'unpublish' === $task ) {
+				AMC_DB::save_row( 'chart_weeks', array( 'status' => 'draft', 'published_at' => null ), $id );
+			} elseif ( 'archive' === $task ) {
+				AMC_DB::save_row( 'chart_weeks', array( 'status' => 'archived', 'archived_at' => current_time( 'mysql' ) ), $id );
+			} elseif ( 'restore' === $task ) {
+				AMC_DB::save_row( 'chart_weeks', array( 'status' => 'draft', 'archived_at' => null ), $id );
+			} elseif ( 'feature' === $task ) {
+				$week = AMC_DB::get_row( 'chart_weeks', $id );
+
+				if ( $week ) {
+					foreach ( AMC_DB::get_chart_weeks( array( 'chart_id' => (int) $week['chart_id'] ) ) as $sibling ) {
+						AMC_DB::save_row( 'chart_weeks', array( 'is_featured' => (int) $sibling['id'] === $id ? 1 : 0 ), (int) $sibling['id'] );
+					}
+				}
+			} elseif ( 'unfeature' === $task ) {
+				AMC_DB::save_row( 'chart_weeks', array( 'is_featured' => 0 ), $id );
+			}
+
+			self::redirect_notice( $redirect, 'success', 'Chart week updated.' );
+		}
+
+		if ( 'entry' === $entity ) {
+			self::assert_cap( 'amc_manage_weeks' );
+
+			if ( 'delete' === $task ) {
+				AMC_DB::delete_row( 'chart_entries', $id );
+			}
+
+			self::redirect_notice( $redirect, 'success', 'Chart entry updated.' );
+		}
+
+		if ( 'upload' === $entity ) {
+			self::assert_cap( 'amc_manage_weeks' );
+
+			if ( 'parse' === $task ) {
+				AMC_Ingestion::parse_upload( $id );
+				self::redirect_notice( add_query_arg( 'upload_id', $id, $redirect ), 'success', 'Upload reparsed successfully.' );
+			} elseif ( 'match' === $task ) {
+				AMC_Ingestion::run_matching( $id );
+				self::redirect_notice( add_query_arg( 'upload_id', $id, $redirect ), 'success', 'Matching queue regenerated for upload.' );
+			} elseif ( 'delete' === $task ) {
+				global $wpdb;
+				$rows = AMC_DB::get_rows( 'source_rows', array( 'where' => array( 'upload_id' => $id ) ) );
+				foreach ( $rows as $row ) {
+					$wpdb->delete( AMC_DB::table( 'matching_queue' ), array( 'source_row_id' => (int) $row['id'] ) );
+				}
+				$wpdb->delete( AMC_DB::table( 'source_rows' ), array( 'upload_id' => $id ) );
+				$wpdb->delete( AMC_DB::table( 'ingestion_logs' ), array( 'upload_id' => $id ) );
+				AMC_DB::delete_row( 'source_uploads', $id );
+				self::redirect_notice( $redirect, 'success', 'Upload deleted.' );
+			}
+		}
+
+		if ( 'matching' === $entity ) {
+			self::assert_cap( 'amc_manage_weeks' );
+			$notes = isset( $_REQUEST['notes'] ) ? sanitize_text_field( wp_unslash( $_REQUEST['notes'] ) ) : '';
+			AMC_Ingestion::apply_matching_decision(
+				$id,
+				$task,
+				array(
+					'entity_type' => isset( $_REQUEST['override_entity_type'] ) ? sanitize_key( wp_unslash( $_REQUEST['override_entity_type'] ) ) : '',
+					'entity_id'   => isset( $_REQUEST['override_entity_id'] ) ? absint( wp_unslash( $_REQUEST['override_entity_id'] ) ) : 0,
+					'notes'       => $notes,
+				)
+			);
+			self::redirect_notice( $redirect, 'success', 'Matching decision saved.' );
+		}
+
+		self::redirect_notice( $redirect, 'error', 'Unsupported action request.' );
+	}
+
+	/**
+	 * Handle source upload submission.
+	 *
+	 * @return void
+	 */
+	public static function handle_upload_source() {
+		self::assert_cap( 'amc_manage_weeks' );
+		check_admin_referer( 'amc_upload_source' );
+
+		if ( empty( $_FILES['source_file']['name'] ) ) {
+			self::redirect_notice( self::posted_redirect(), 'error', 'Please choose a source file to upload.' );
+		}
+
+		$upload_id = AMC_Ingestion::create_upload(
+			$_FILES['source_file'],
+			array(
+				'source_name' => isset( $_POST['source_name'] ) ? sanitize_text_field( wp_unslash( $_POST['source_name'] ) ) : '',
+				'chart_week'  => isset( $_POST['chart_week'] ) ? sanitize_text_field( wp_unslash( $_POST['chart_week'] ) ) : current_time( 'Y-m-d' ),
+			)
+		);
+
+		if ( ! $upload_id ) {
+			self::redirect_notice( self::posted_redirect(), 'error', 'Upload failed. Check file permissions or file type.' );
+		}
+
+		self::redirect_notice( add_query_arg( 'upload_id', $upload_id, self::posted_redirect() ), 'success', 'Source upload saved, parsed, and queued for matching.' );
+	}
+
+	/**
+	 * Handle scoring save requests.
+	 *
+	 * @return void
+	 */
+	public static function handle_save_scoring() {
+		self::assert_cap( 'amc_manage_weeks' );
+		check_admin_referer( 'amc_save_scoring' );
+		AMC_Ingestion::save_scoring_rules( $_POST );
+		self::redirect_notice( self::posted_redirect(), 'success', 'Scoring rules saved successfully.' );
+	}
+
+	/**
+	 * Handle settings save requests.
+	 *
+	 * @return void
+	 */
+	public static function handle_save_settings() {
+		self::assert_cap( 'amc_manage_settings' );
+		check_admin_referer( 'amc_save_settings' );
+
+		AMC_DB::save_settings(
+			array(
+				'platform_name'    => sanitize_text_field( wp_unslash( $_POST['platform_name'] ) ),
+				'logo'             => sanitize_text_field( wp_unslash( $_POST['logo'] ) ),
+				'seo_defaults'     => sanitize_text_field( wp_unslash( $_POST['seo_defaults'] ) ),
+				'social_image'     => sanitize_text_field( wp_unslash( $_POST['social_image'] ) ),
+				'homepage_chart'   => sanitize_text_field( wp_unslash( $_POST['homepage_chart'] ) ),
+				'methodology_text' => sanitize_textarea_field( wp_unslash( $_POST['methodology_text'] ) ),
+				'language'         => sanitize_text_field( wp_unslash( $_POST['language'] ) ),
+				'date_format'      => sanitize_text_field( wp_unslash( $_POST['date_format'] ) ),
+			)
+		);
+
+		self::redirect_notice( self::posted_redirect(), 'success', 'Settings saved successfully.' );
+	}
+
+	/**
+	 * Ensure current user has a capability.
+	 *
+	 * @param string $cap Capability.
+	 * @return void
+	 */
+	private static function assert_cap( $cap ) {
+		if ( ! current_user_can( $cap ) ) {
+			wp_die( esc_html__( 'You do not have permission to perform this action.', 'arabic-music-charts' ) );
+		}
+	}
+
+	/**
+	 * Get redirect target from request.
+	 *
+	 * @return string
+	 */
+	private static function posted_redirect() {
+		$redirect = isset( $_REQUEST['redirect_to'] ) ? esc_url_raw( wp_unslash( $_REQUEST['redirect_to'] ) ) : wp_get_referer();
+
+		return $redirect ? $redirect : admin_url( 'admin.php?page=kontentainment-charts' );
+	}
+
+	/**
+	 * Redirect with a notice.
+	 *
+	 * @param string $url Target url.
+	 * @param string $type Notice type.
+	 * @param string $message Message.
+	 * @return void
+	 */
+	private static function redirect_notice( $url, $type, $message ) {
+		wp_safe_redirect(
+			add_query_arg(
+				array(
+					'amc_notice_type' => $type,
+					'amc_notice'      => $message,
+				),
+				$url
+			)
+		);
+		exit;
 	}
 
 	/**

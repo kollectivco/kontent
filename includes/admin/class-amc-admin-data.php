@@ -92,11 +92,13 @@ class AMC_Admin_Data {
 	 * @return array
 	 */
 	public static function overview_cards() {
+		$counts = AMC_DB::dashboard_counts();
+
 		return array(
-			array( 'label' => 'Total Charts', 'value' => '12', 'delta' => '+2 prepared', 'tone' => 'gold' ),
-			array( 'label' => 'Tracks In Library', 'value' => '4,286', 'delta' => '318 pending review', 'tone' => 'violet' ),
-			array( 'label' => 'Artists In Library', 'value' => '1,042', 'delta' => '41 unmatched', 'tone' => 'blue' ),
-			array( 'label' => 'Albums In Library', 'value' => '612', 'delta' => '27 hidden', 'tone' => 'emerald' ),
+			array( 'label' => 'Total Charts', 'value' => (string) $counts['charts'], 'delta' => self::count_label( 'chart_weeks', 'draft', 'draft weeks' ), 'tone' => 'gold' ),
+			array( 'label' => 'Tracks In Library', 'value' => (string) $counts['tracks'], 'delta' => self::count_label( 'tracks', 'archived', 'archived' ), 'tone' => 'violet' ),
+			array( 'label' => 'Artists In Library', 'value' => (string) $counts['artists'], 'delta' => self::count_label( 'artists', 'archived', 'archived' ), 'tone' => 'blue' ),
+			array( 'label' => 'Albums In Library', 'value' => (string) $counts['albums'], 'delta' => self::count_label( 'albums', 'archived', 'archived' ), 'tone' => 'emerald' ),
 		);
 	}
 
@@ -106,11 +108,21 @@ class AMC_Admin_Data {
 	 * @return array
 	 */
 	public static function recent_uploads() {
-		return array(
-			array( 'source' => 'Spotify', 'chart_week' => '2026-03-20', 'status' => 'Processed', 'rows' => 1220, 'uploader' => 'Mina Farid' ),
-			array( 'source' => 'YouTube Music', 'chart_week' => '2026-03-20', 'status' => 'Pending Match Review', 'rows' => 1188, 'uploader' => 'Dalia Hassan' ),
-			array( 'source' => 'TikTok', 'chart_week' => '2026-03-20', 'status' => 'Preview Ready', 'rows' => 680, 'uploader' => 'Ramy Adel' ),
-			array( 'source' => 'Shazam', 'chart_week' => '2026-03-20', 'status' => 'Duplicate Alerts', 'rows' => 510, 'uploader' => 'Nada Samir' ),
+		$uploads = AMC_DB::get_rows( 'source_uploads', array( 'order_by' => 'id DESC', 'limit' => 4 ) );
+
+		return array_map(
+			function ( $row ) {
+				$user = ! empty( $row['uploader_id'] ) ? get_user_by( 'id', (int) $row['uploader_id'] ) : null;
+
+				return array(
+					'source'     => $row['source_name'],
+					'chart_week' => $row['chart_week'],
+					'status'     => ucfirst( $row['file_status'] ),
+					'rows'       => (int) $row['row_count'],
+					'uploader'   => $user ? $user->display_name : 'System',
+				);
+			},
+			$uploads
 		);
 	}
 
@@ -120,10 +132,19 @@ class AMC_Admin_Data {
 	 * @return array
 	 */
 	public static function alerts() {
+		global $wpdb;
+
+		$tracks_table  = AMC_DB::table( 'tracks' );
+		$artists_table = AMC_DB::table( 'artists' );
+		$albums_table  = AMC_DB::table( 'albums' );
+		$dupes         = (int) $wpdb->get_var( "SELECT COUNT(*) FROM (SELECT slug FROM {$tracks_table} GROUP BY slug HAVING COUNT(*) > 1) duplicate_tracks" ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		$missing       = AMC_DB::count_rows( 'tracks', array( 'cover_image' => '' ) ) + AMC_DB::count_rows( 'artists', array( 'image' => '' ) ) + AMC_DB::count_rows( 'albums', array( 'cover_image' => '' ) );
+		$draft_weeks   = AMC_DB::count_rows( 'chart_weeks', array( 'status' => 'draft' ) );
+
 		return array(
-			array( 'title' => 'Duplicate track candidates', 'body' => '18 likely duplicates need manual review before the next publishing cycle.', 'tone' => 'warning' ),
-			array( 'title' => 'Missing artwork', 'body' => '9 entries in the current Hot 100 preview are still using fallback covers.', 'tone' => 'danger' ),
-			array( 'title' => 'Unmatched upload rows', 'body' => '42 rows from YouTube Music and Shazam are waiting for artist or track resolution.', 'tone' => 'info' ),
+			array( 'title' => 'Duplicate track candidates', 'body' => $dupes ? $dupes . ' duplicate slugs need manual review.' : 'No duplicate track slugs are currently detected.', 'tone' => 'warning' ),
+			array( 'title' => 'Missing artwork', 'body' => $missing ? $missing . ' artist, album, or track records still use fallback artwork styling.' : 'All current records have artwork placeholders or assigned imagery.', 'tone' => 'danger' ),
+			array( 'title' => 'Draft chart weeks', 'body' => $draft_weeks ? $draft_weeks . ' chart weeks are still waiting for publication flow.' : 'No pending draft weeks right now.', 'tone' => 'info' ),
 		);
 	}
 
@@ -134,9 +155,9 @@ class AMC_Admin_Data {
 	 */
 	public static function chart_week_status() {
 		return array(
-			array( 'label' => 'Published Weeks', 'value' => 24 ),
-			array( 'label' => 'Draft Weeks', 'value' => 3 ),
-			array( 'label' => 'Archived Weeks', 'value' => 68 ),
+			array( 'label' => 'Published Weeks', 'value' => AMC_DB::count_rows( 'chart_weeks', array( 'status' => 'published' ) ) ),
+			array( 'label' => 'Draft Weeks', 'value' => AMC_DB::count_rows( 'chart_weeks', array( 'status' => 'draft' ) ) ),
+			array( 'label' => 'Archived Weeks', 'value' => AMC_DB::count_rows( 'chart_weeks', array( 'status' => 'archived' ) ) ),
 		);
 	}
 
@@ -146,13 +167,26 @@ class AMC_Admin_Data {
 	 * @return array
 	 */
 	public static function chart_categories() {
-		return array(
-			array( 'name' => 'Top Artists', 'slug' => 'top-artists', 'type' => 'Artists', 'display_order' => 1, 'active' => 'Active', 'featured' => 'Yes', 'archive' => 'Enabled' ),
-			array( 'name' => 'Top Tracks', 'slug' => 'top-tracks', 'type' => 'Tracks', 'display_order' => 2, 'active' => 'Active', 'featured' => 'Yes', 'archive' => 'Enabled' ),
-			array( 'name' => 'Top Albums', 'slug' => 'top-albums', 'type' => 'Albums', 'display_order' => 3, 'active' => 'Active', 'featured' => 'No', 'archive' => 'Enabled' ),
-			array( 'name' => 'Hot 100 Tracks', 'slug' => 'hot-100-tracks', 'type' => 'Tracks', 'display_order' => 4, 'active' => 'Active', 'featured' => 'Yes', 'archive' => 'Enabled' ),
-			array( 'name' => 'Hot 100 Artists', 'slug' => 'hot-100-artists', 'type' => 'Artists', 'display_order' => 5, 'active' => 'Active', 'featured' => 'No', 'archive' => 'Enabled' ),
-			array( 'name' => 'Top New Voices', 'slug' => 'top-new-voices', 'type' => 'Artists', 'display_order' => 6, 'active' => 'Hidden', 'featured' => 'No', 'archive' => 'Disabled' ),
+		$rows = AMC_DB::get_rows( 'charts', array( 'order_by' => 'display_order ASC, id ASC' ) );
+
+		return array_map(
+			function ( $row ) {
+				return array(
+					'id'            => (int) $row['id'],
+					'name'          => $row['name'],
+					'slug'          => $row['slug'],
+					'type'          => ucfirst( $row['type'] ) . 's',
+					'display_order' => (int) $row['display_order'],
+					'active'        => 'active' === $row['status'] ? 'Active' : 'Hidden',
+					'featured'      => ! empty( $row['is_featured_home'] ) ? 'Yes' : 'No',
+					'archive'       => ! empty( $row['archive_enabled'] ) ? 'Enabled' : 'Disabled',
+					'accent'        => $row['accent'],
+					'description'   => $row['description'],
+					'kicker'        => $row['kicker'],
+					'status'        => $row['status'],
+				);
+			},
+			$rows
 		);
 	}
 
@@ -162,13 +196,14 @@ class AMC_Admin_Data {
 	 * @return array
 	 */
 	public static function weekly_entries() {
-		return array(
-			array( 'rank' => 1, 'item' => 'Shabab El Layl', 'linked' => 'Nancy Ajram', 'previous' => 2, 'peak' => 1, 'weeks' => 15, 'movement' => 'Up', 'score' => '97.4', 'status' => 'Preview Ready' ),
-			array( 'rank' => 2, 'item' => 'Dorak Gai', 'linked' => 'Wegz', 'previous' => 1, 'peak' => 1, 'weeks' => 16, 'movement' => 'Down', 'score' => '96.2', 'status' => 'Preview Ready' ),
-			array( 'rank' => 3, 'item' => 'Baheb El Bahr', 'linked' => 'Amr Diab', 'previous' => 5, 'peak' => 3, 'weeks' => 10, 'movement' => 'Up', 'score' => '93.8', 'status' => 'Draft' ),
-			array( 'rank' => 4, 'item' => 'Maa Elsowar', 'linked' => 'Balqees', 'previous' => 8, 'peak' => 4, 'weeks' => 5, 'movement' => 'Up', 'score' => '91.0', 'status' => 'Draft' ),
-			array( 'rank' => 5, 'item' => 'Ghorba', 'linked' => 'Marwan Pablo', 'previous' => 4, 'peak' => 4, 'weeks' => 9, 'movement' => 'Down', 'score' => '89.7', 'status' => 'Preview Ready' ),
-		);
+		$weeks = AMC_DB::get_chart_weeks();
+		$week  = ! empty( $weeks[0] ) ? $weeks[0] : null;
+
+		if ( ! $week ) {
+			return array();
+		}
+
+		return self::entries_for_week( (int) $week['id'] );
 	}
 
 	/**
@@ -177,10 +212,33 @@ class AMC_Admin_Data {
 	 * @return array
 	 */
 	public static function tracks() {
-		return array(
-			array( 'title' => 'Shabab El Layl', 'artist' => 'Nancy Ajram', 'album' => 'Noor Nights', 'isrc' => 'EG-KTN-26-00001', 'aliases' => 'Shabab El Leil', 'release_date' => '2026-02-14', 'genre' => 'Regional Pop', 'status' => 'Active' ),
-			array( 'title' => 'Dorak Gai', 'artist' => 'Wegz', 'album' => 'Standalone', 'isrc' => 'EG-KTN-26-00012', 'aliases' => 'Dork Gai', 'release_date' => '2026-01-28', 'genre' => 'Trap', 'status' => 'Active' ),
-			array( 'title' => 'Akhbarak Eh', 'artist' => 'Elissa', 'album' => 'Letters In Neon', 'isrc' => 'LB-KTN-26-00005', 'aliases' => 'Akhbarak Eih', 'release_date' => '2026-02-05', 'genre' => 'Ballad', 'status' => 'Hidden' ),
+		$rows = AMC_DB::get_rows( 'tracks', array( 'order_by' => 'title ASC' ) );
+
+		return array_map(
+			function ( $row ) {
+				$artist = ! empty( $row['artist_id'] ) ? AMC_DB::get_row( 'artists', (int) $row['artist_id'] ) : null;
+				$album  = ! empty( $row['album_id'] ) ? AMC_DB::get_row( 'albums', (int) $row['album_id'] ) : null;
+
+				return array(
+					'id'           => (int) $row['id'],
+					'title'        => $row['title'],
+					'slug'         => $row['slug'],
+					'artist'       => $artist ? $artist['name'] : 'Unknown',
+					'album'        => $album ? $album['title'] : 'Standalone',
+					'isrc'         => $row['isrc'],
+					'aliases'      => $row['aliases'],
+					'release_date' => $row['release_date'],
+					'genre'        => $row['genre'],
+					'status'       => ucfirst( $row['status'] ),
+					'raw_status'   => $row['status'],
+					'artist_id'    => (int) $row['artist_id'],
+					'album_id'     => (int) $row['album_id'],
+					'duration'     => $row['duration'],
+					'description'  => $row['description'],
+					'gradient'     => $row['gradient'],
+				);
+			},
+			$rows
 		);
 	}
 
@@ -190,10 +248,28 @@ class AMC_Admin_Data {
 	 * @return array
 	 */
 	public static function artists() {
-		return array(
-			array( 'name' => 'Nancy Ajram', 'country' => 'Lebanon', 'genre' => 'Regional Pop, Dance Pop', 'socials' => 'IG, YouTube, TikTok', 'related_tracks' => 6, 'related_albums' => 2, 'status' => 'Active' ),
-			array( 'name' => 'Amr Diab', 'country' => 'Egypt', 'genre' => 'Mediterranean Pop', 'socials' => 'IG, YouTube', 'related_tracks' => 12, 'related_albums' => 5, 'status' => 'Active' ),
-			array( 'name' => 'Marwan Pablo', 'country' => 'Egypt', 'genre' => 'Trap, Alternative Rap', 'socials' => 'IG, Spotify', 'related_tracks' => 8, 'related_albums' => 1, 'status' => 'Hidden' ),
+		$rows = AMC_DB::get_rows( 'artists', array( 'order_by' => 'name ASC' ) );
+
+		return array_map(
+			function ( $row ) {
+				return array(
+					'id'             => (int) $row['id'],
+					'name'           => $row['name'],
+					'slug'           => $row['slug'],
+					'country'        => $row['country'],
+					'genre'          => $row['genre'],
+					'socials'        => $row['social_links'],
+					'related_tracks' => AMC_DB::count_rows( 'tracks', array( 'artist_id' => (int) $row['id'] ) ),
+					'related_albums' => AMC_DB::count_rows( 'albums', array( 'artist_id' => (int) $row['id'] ) ),
+					'status'         => ucfirst( $row['status'] ),
+					'raw_status'     => $row['status'],
+					'bio'            => $row['bio'],
+					'monthly'        => $row['monthly_listeners'],
+					'streak'         => $row['chart_streak'],
+					'gradient'       => $row['gradient'],
+				);
+			},
+			$rows
 		);
 	}
 
@@ -203,10 +279,29 @@ class AMC_Admin_Data {
 	 * @return array
 	 */
 	public static function albums() {
-		return array(
-			array( 'title' => 'Noor Nights', 'artist' => 'Nancy Ajram', 'release_date' => '2026-02-01', 'tracks' => 13, 'genre' => 'Pop', 'label' => 'Kontentainment Music', 'status' => 'Active' ),
-			array( 'title' => 'Parallel Lines', 'artist' => 'Marwan Pablo', 'release_date' => '2026-01-15', 'tracks' => 10, 'genre' => 'Rap', 'label' => 'Northwave', 'status' => 'Active' ),
-			array( 'title' => 'Golden Room', 'artist' => 'Assala', 'release_date' => '2025-11-07', 'tracks' => 11, 'genre' => 'Tarab Pop', 'label' => 'Sada', 'status' => 'Hidden' ),
+		$rows = AMC_DB::get_rows( 'albums', array( 'order_by' => 'title ASC' ) );
+
+		return array_map(
+			function ( $row ) {
+				$artist = ! empty( $row['artist_id'] ) ? AMC_DB::get_row( 'artists', (int) $row['artist_id'] ) : null;
+
+				return array(
+					'id'           => (int) $row['id'],
+					'title'        => $row['title'],
+					'slug'         => $row['slug'],
+					'artist'       => $artist ? $artist['name'] : 'Unknown',
+					'release_date' => $row['release_date'],
+					'tracks'       => AMC_DB::count_rows( 'tracks', array( 'album_id' => (int) $row['id'] ) ),
+					'genre'        => $row['genre'],
+					'label'        => $row['label'],
+					'status'       => ucfirst( $row['status'] ),
+					'raw_status'   => $row['status'],
+					'artist_id'    => (int) $row['artist_id'],
+					'description'  => $row['description'],
+					'gradient'     => $row['gradient'],
+				);
+			},
+			$rows
 		);
 	}
 
@@ -216,13 +311,28 @@ class AMC_Admin_Data {
 	 * @return array
 	 */
 	public static function uploads() {
-		return array(
-			array( 'source' => 'Spotify', 'upload_date' => '2026-03-19 09:14', 'week' => '2026-03-20', 'status' => 'Processed', 'row_count' => 1220, 'preview' => 'Top rows mapped', 'uploader' => 'Mina Farid' ),
-			array( 'source' => 'Apple Music', 'upload_date' => '2026-03-19 09:26', 'week' => '2026-03-20', 'status' => 'Awaiting Validation', 'row_count' => 1140, 'preview' => '3 unmatched albums', 'uploader' => 'Mina Farid' ),
-			array( 'source' => 'Anghami', 'upload_date' => '2026-03-19 10:01', 'week' => '2026-03-20', 'status' => 'Preview Ready', 'row_count' => 930, 'preview' => '12 duplicate candidates', 'uploader' => 'Dalia Hassan' ),
-			array( 'source' => 'TikTok', 'upload_date' => '2026-03-19 10:45', 'week' => '2026-03-20', 'status' => 'Draft Preview', 'row_count' => 680, 'preview' => 'Trend velocity imported', 'uploader' => 'Nada Samir' ),
-			array( 'source' => 'Shazam', 'upload_date' => '2026-03-19 11:10', 'week' => '2026-03-20', 'status' => 'Needs Match Review', 'row_count' => 510, 'preview' => '42 rows unresolved', 'uploader' => 'Ramy Adel' ),
-			array( 'source' => 'YouTube Music', 'upload_date' => '2026-03-19 11:32', 'week' => '2026-03-20', 'status' => 'Processed', 'row_count' => 1188, 'preview' => 'All tracks ingested', 'uploader' => 'Dalia Hassan' ),
+		$rows = AMC_DB::get_rows( 'source_uploads', array( 'order_by' => 'id DESC' ) );
+
+		return array_map(
+			function ( $row ) {
+				$user = ! empty( $row['uploader_id'] ) ? get_user_by( 'id', (int) $row['uploader_id'] ) : null;
+
+				return array(
+					'id'          => (int) $row['id'],
+					'source'      => $row['source_name'],
+					'upload_date' => $row['created_at'],
+					'week'        => $row['chart_week'],
+					'status'      => ucfirst( $row['file_status'] ),
+					'raw_status'  => $row['file_status'],
+					'row_count'   => (int) $row['row_count'],
+					'preview'     => $row['error_message'] ? $row['error_message'] : $row['preview_text'],
+					'uploader'    => $user ? $user->display_name : 'System',
+					'file_name'   => $row['file_name'],
+					'file_url'    => $row['file_url'],
+					'error'       => $row['error_message'],
+				);
+			},
+			$rows
 		);
 	}
 
@@ -232,10 +342,26 @@ class AMC_Admin_Data {
 	 * @return array
 	 */
 	public static function matching_candidates() {
-		return array(
-			array( 'candidate' => 'Shabab El Layl / Shabab El Leil', 'type' => 'Track', 'confidence' => '96%', 'sources' => 'Spotify, TikTok', 'status' => 'Needs Approval' ),
-			array( 'candidate' => 'Wegz / Wegz.', 'type' => 'Artist', 'confidence' => '93%', 'sources' => 'Shazam, YouTube Music', 'status' => 'Needs Approval' ),
-			array( 'candidate' => 'Nancy Ajram feat. Guest / Nancy Ajram', 'type' => 'Artist', 'confidence' => '81%', 'sources' => 'Apple Music', 'status' => 'Override Suggested' ),
+		$rows = AMC_DB::get_rows( 'matching_queue', array( 'order_by' => 'id DESC' ) );
+
+		return array_map(
+			function ( $row ) {
+				$source_row = AMC_DB::get_row( 'source_rows', (int) $row['source_row_id'] );
+				$candidate  = trim( ( ! empty( $source_row['normalized_title'] ) ? $source_row['normalized_title'] : 'Unknown title' ) . ' / ' . ( ! empty( $source_row['normalized_artist'] ) ? $source_row['normalized_artist'] : 'Unknown artist' ), ' /' );
+				$upload     = AMC_DB::get_row( 'source_uploads', (int) $row['upload_id'] );
+
+				return array(
+					'id'         => (int) $row['id'],
+					'candidate'  => $candidate,
+					'type'       => ucfirst( $row['entity_type'] ),
+					'confidence' => $row['confidence'] . '%',
+					'sources'    => $upload ? $upload['source_name'] : 'Unknown source',
+					'status'     => ucwords( str_replace( '_', ' ', $row['status'] ) ),
+					'raw_status' => $row['status'],
+					'queue'      => $row,
+				);
+			},
+			$rows
 		);
 	}
 
@@ -245,22 +371,7 @@ class AMC_Admin_Data {
 	 * @return array
 	 */
 	public static function scoring() {
-		return array(
-			'weights' => array(
-				array( 'source' => 'Spotify', 'weight' => '30%' ),
-				array( 'source' => 'YouTube Music', 'weight' => '22%' ),
-				array( 'source' => 'TikTok', 'weight' => '18%' ),
-				array( 'source' => 'Shazam', 'weight' => '12%' ),
-				array( 'source' => 'Apple Music', 'weight' => '10%' ),
-				array( 'source' => 'Anghami', 'weight' => '8%' ),
-			),
-			'methodology' => array(
-				'Minimum release age' => '3 days before chart cut-off',
-				'Minimum source coverage' => 'At least 2 eligible sources',
-				'Manual editorial override' => 'Allowed with approval note',
-				'Catalog re-entry threshold' => '85 methodology score',
-			),
-		);
+		return AMC_Ingestion::get_scoring_rules();
 	}
 
 	/**
@@ -269,13 +380,43 @@ class AMC_Admin_Data {
 	 * @return array
 	 */
 	public static function publishing_preview() {
+		$weeks = AMC_DB::get_chart_weeks();
+		$week  = ! empty( $weeks[0] ) ? $weeks[0] : null;
+
+		if ( ! $week ) {
+			return array(
+				'current_week' => 'No chart week available',
+				'comparison'   => array(),
+				'actions'      => array( 'Create Draft Week' ),
+			);
+		}
+
+		$entries = AMC_DB::get_chart_entries( (int) $week['id'] );
+		$new     = 0;
+		$hidden  = 0;
+		$jump    = 0;
+
+		foreach ( $entries as $entry ) {
+			if ( 'new' === $entry['movement'] ) {
+				++$new;
+			}
+
+			if ( absint( $entry['previous_rank'] ) > 0 ) {
+				$jump = max( $jump, absint( $entry['previous_rank'] ) - absint( $entry['current_rank'] ) );
+			}
+
+			if ( empty( $entry['artwork'] ) ) {
+				++$hidden;
+			}
+		}
+
 		return array(
-			'current_week'   => 'Week of March 20, 2026',
+			'current_week'   => 'Week of ' . wp_date( 'F j, Y', strtotime( $week['week_date'] ) ),
 			'comparison'     => array(
-				array( 'metric' => 'New entries', 'value' => '6' ),
-				array( 'metric' => 'Biggest jump', 'value' => '+4 positions' ),
-				array( 'metric' => 'Hidden rows', 'value' => '3' ),
-				array( 'metric' => 'Manual overrides', 'value' => '2' ),
+				array( 'metric' => 'New entries', 'value' => (string) $new ),
+				array( 'metric' => 'Biggest jump', 'value' => $jump ? '+' . $jump . ' positions' : 'No upward movement' ),
+				array( 'metric' => 'Fallback artwork', 'value' => (string) $hidden ),
+				array( 'metric' => 'Status', 'value' => ucfirst( $week['status'] ) ),
 			),
 			'actions'        => array( 'Preview Draft', 'Compare With Previous Week', 'Publish Week', 'Unpublish Week', 'Feature On Homepage' ),
 		);
@@ -287,10 +428,22 @@ class AMC_Admin_Data {
 	 * @return array
 	 */
 	public static function archives() {
-		return array(
-			array( 'week' => '2026-03-13', 'charts' => 5, 'status' => 'Archived', 'notes' => 'Featured homepage week', 'actions' => 'Reopen / Restore' ),
-			array( 'week' => '2026-03-06', 'charts' => 5, 'status' => 'Archived', 'notes' => '2 manual merges logged', 'actions' => 'Restore' ),
-			array( 'week' => '2026-02-27', 'charts' => 5, 'status' => 'Published', 'notes' => 'Frozen snapshot', 'actions' => 'Archive / Reopen' ),
+		$weeks  = AMC_DB::get_chart_weeks();
+		$charts = self::chart_lookup();
+
+		return array_map(
+			function ( $row ) use ( $charts ) {
+				return array(
+					'id'      => (int) $row['id'],
+					'week'    => $row['week_date'],
+					'chart'   => ! empty( $charts[ $row['chart_id'] ] ) ? $charts[ $row['chart_id'] ]['name'] : 'Unknown chart',
+					'charts'  => 1,
+					'status'  => ucfirst( $row['status'] ),
+					'notes'   => $row['notes'],
+					'actions' => 'archived' === $row['status'] ? 'Restore' : 'Archive',
+				);
+			},
+			$weeks
 		);
 	}
 
@@ -300,12 +453,32 @@ class AMC_Admin_Data {
 	 * @return array
 	 */
 	public static function users() {
-		return array(
-			array( 'role' => 'Admin', 'permissions' => 'Full control', 'members' => 2 ),
-			array( 'role' => 'Editor', 'permissions' => 'Edit charts, publish weeks', 'members' => 3 ),
-			array( 'role' => 'Data Manager', 'permissions' => 'Uploads, matching, scoring review', 'members' => 4 ),
-			array( 'role' => 'Viewer', 'permissions' => 'Read-only visibility', 'members' => 5 ),
+		global $wp_roles;
+
+		$map = array(
+			'administrator'   => 'Full control',
+			'editor'          => 'Edit charts, library, weeks, publish',
+			'amc_data_manager'=> 'Charts, library, weeks',
+			'amc_viewer'      => 'Read-only dashboard visibility',
 		);
+
+		$rows = array();
+
+		foreach ( $map as $role_key => $label ) {
+			$role = isset( $wp_roles->roles[ $role_key ] ) ? $wp_roles->roles[ $role_key ] : null;
+
+			if ( ! $role ) {
+				continue;
+			}
+
+			$rows[] = array(
+				'role'        => $role['name'],
+				'permissions' => $label,
+				'members'     => count( get_users( array( 'role' => $role_key ) ) ),
+			);
+		}
+
+		return $rows;
 	}
 
 	/**
@@ -314,15 +487,17 @@ class AMC_Admin_Data {
 	 * @return array
 	 */
 	public static function settings() {
+		$settings = AMC_DB::get_settings();
+
 		return array(
-			'Platform name' => 'Kontentainment Charts',
-			'Logo' => 'kontentainment-charts-mark.svg',
-			'SEO defaults' => 'Enable chart-specific metadata',
-			'Social image' => 'weekly-share-default.jpg',
-			'Homepage chart' => 'Hot 100 Tracks',
-			'Methodology text' => 'Custom weighted methodology summary',
-			'Language' => 'English',
-			'Date format' => 'F j, Y',
+			'Platform name'   => $settings['platform_name'],
+			'Logo'            => $settings['logo'],
+			'SEO defaults'    => $settings['seo_defaults'],
+			'Social image'    => $settings['social_image'],
+			'Homepage chart'  => $settings['homepage_chart'],
+			'Methodology text'=> $settings['methodology_text'],
+			'Language'        => $settings['language'],
+			'Date format'     => $settings['date_format'],
 		);
 	}
 
@@ -332,10 +507,18 @@ class AMC_Admin_Data {
 	 * @return array
 	 */
 	public static function logs() {
-		return array(
-			array( 'time' => '2026-03-20 11:43', 'event' => 'Chart week draft saved', 'actor' => 'Dalia Hassan', 'status' => 'Info' ),
-			array( 'time' => '2026-03-20 11:10', 'event' => 'Shazam upload flagged duplicate candidates', 'actor' => 'System', 'status' => 'Warning' ),
-			array( 'time' => '2026-03-20 10:52', 'event' => 'Manual score override prepared', 'actor' => 'Mina Farid', 'status' => 'Review' ),
+		$rows = AMC_DB::get_rows( 'ingestion_logs', array( 'order_by' => 'id DESC', 'limit' => 20 ) );
+
+		return array_map(
+			function ( $row ) {
+				return array(
+					'time'   => $row['created_at'],
+					'event'  => $row['action'] . ': ' . $row['message'],
+					'actor'  => 'System',
+					'status' => ucfirst( $row['level'] ),
+				);
+			},
+			$rows
 		);
 	}
 
@@ -359,10 +542,71 @@ class AMC_Admin_Data {
 	 */
 	public static function permissions() {
 		return array(
-			array( 'role' => 'Admin', 'dashboard_access' => 'Full', 'publishing' => 'Allowed', 'settings' => 'Allowed' ),
-			array( 'role' => 'Editor', 'dashboard_access' => 'Full dashboard', 'publishing' => 'Allowed', 'settings' => 'Restricted' ),
-			array( 'role' => 'Data Manager', 'dashboard_access' => 'Operational sections', 'publishing' => 'Restricted', 'settings' => 'Restricted' ),
+			array( 'role' => 'Administrator', 'dashboard_access' => 'Full', 'publishing' => 'Allowed', 'settings' => 'Allowed' ),
+			array( 'role' => 'Editor', 'dashboard_access' => 'Operational dashboard', 'publishing' => 'Allowed', 'settings' => 'Restricted' ),
+			array( 'role' => 'Data Manager', 'dashboard_access' => 'Charts, library, weeks', 'publishing' => 'Restricted', 'settings' => 'Restricted' ),
 			array( 'role' => 'Viewer', 'dashboard_access' => 'Read only', 'publishing' => 'Blocked', 'settings' => 'Blocked' ),
 		);
+	}
+
+	/**
+	 * Entry rows for a given chart week.
+	 *
+	 * @param int $week_id Week id.
+	 * @return array
+	 */
+	public static function entries_for_week( $week_id ) {
+		$entries = AMC_DB::get_chart_entries( $week_id );
+
+		return array_map(
+			function ( $row ) {
+				$entity = AMC_Data::get_entity( $row['entity_type'], (int) $row['entity_id'] );
+
+				return array(
+					'id'       => (int) $row['id'],
+					'rank'     => (int) $row['current_rank'],
+					'item'     => $entity ? $entity['name'] : 'Missing item',
+					'linked'   => ! empty( $entity['artist']['name'] ) ? $entity['artist']['name'] : ( ! empty( $entity['country'] ) ? $entity['country'] : ucfirst( $row['entity_type'] ) ),
+					'previous' => (int) $row['previous_rank'],
+					'peak'     => (int) $row['peak_rank'],
+					'weeks'    => (int) $row['weeks_on_chart'],
+					'movement' => ucfirst( $row['movement'] ),
+					'score'    => (string) $row['score'],
+					'status'   => $entity ? 'Connected' : 'Missing',
+					'entity_type' => $row['entity_type'],
+					'entity_id'   => (int) $row['entity_id'],
+					'artwork'     => $row['artwork'],
+				);
+			},
+			$entries
+		);
+	}
+
+	/**
+	 * Simple chart id lookup.
+	 *
+	 * @return array
+	 */
+	private static function chart_lookup() {
+		$rows = AMC_DB::get_rows( 'charts', array( 'order_by' => 'display_order ASC, id ASC' ) );
+		$out  = array();
+
+		foreach ( $rows as $row ) {
+			$out[ $row['id'] ] = $row;
+		}
+
+		return $out;
+	}
+
+	/**
+	 * Count label helper.
+	 *
+	 * @param string $table Table key.
+	 * @param string $status Status.
+	 * @param string $label Label.
+	 * @return string
+	 */
+	private static function count_label( $table, $status, $label ) {
+		return AMC_DB::count_rows( $table, array( 'status' => $status ) ) . ' ' . $label;
 	}
 }

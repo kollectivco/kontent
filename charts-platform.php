@@ -3,7 +3,7 @@
  * Plugin Name: Kontentainment Charts
  * Plugin URI: https://github.com/kollectivco/kontent
  * Description: Public-facing charts platform and control center for Kontentainment Charts.
- * Version: 2.1.3
+ * Version: 3.1.1
  * Author: Codex
  * License: GPL2+
  * Text Domain: arabic-music-charts
@@ -14,7 +14,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'AMC_PLUGIN_VERSION', '2.1.3' );
+define( 'AMC_PLUGIN_VERSION', '3.1.1' );
 define( 'AMC_PLUGIN_FILE', __FILE__ );
 define( 'AMC_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'AMC_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
@@ -22,7 +22,10 @@ define( 'AMC_ROUTE_BASE', 'music-charts' );
 
 require_once AMC_PLUGIN_DIR . 'includes/admin/class-amc-admin-data.php';
 require_once AMC_PLUGIN_DIR . 'includes/admin/class-amc-admin.php';
+require_once AMC_PLUGIN_DIR . 'includes/class-amc-capabilities.php';
+require_once AMC_PLUGIN_DIR . 'includes/class-amc-db.php';
 require_once AMC_PLUGIN_DIR . 'includes/class-amc-data.php';
+require_once AMC_PLUGIN_DIR . 'includes/class-amc-ingestion.php';
 require_once AMC_PLUGIN_DIR . 'includes/class-amc-seeder.php';
 require_once AMC_PLUGIN_DIR . 'includes/class-amc-routing.php';
 require_once AMC_PLUGIN_DIR . 'includes/class-amc-updater.php';

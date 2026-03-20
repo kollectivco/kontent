@@ -22,6 +22,9 @@ class AMC_Updater {
 		add_filter( 'pre_set_site_transient_update_plugins', array( __CLASS__, 'inject_update' ) );
 		add_filter( 'plugins_api', array( __CLASS__, 'plugin_info' ), 20, 3 );
 		add_filter( 'upgrader_post_install', array( __CLASS__, 'after_install' ), 10, 3 );
+		add_filter( 'plugin_row_meta', array( __CLASS__, 'plugin_row_meta' ), 10, 4 );
+		add_action( 'admin_init', array( __CLASS__, 'maybe_force_check' ) );
+		add_action( 'admin_notices', array( __CLASS__, 'render_plugins_notice' ) );
 	}
 
 	/**
@@ -125,6 +128,130 @@ class AMC_Updater {
 		}
 
 		return $result;
+	}
+
+	/**
+	 * Add plugin row meta links on the plugins screen.
+	 *
+	 * @param array  $links Existing links.
+	 * @param string $file Plugin file.
+	 * @param array  $data Plugin data.
+	 * @param string $status Status.
+	 * @return array
+	 */
+	public static function plugin_row_meta( $links, $file, $data, $status ) {
+		unset( $data, $status );
+
+		if ( plugin_basename( AMC_PLUGIN_FILE ) !== $file ) {
+			return $links;
+		}
+
+		$links[] = sprintf(
+			'<a href="%s">%s</a>',
+			esc_url( self::check_updates_url() ),
+			esc_html__( 'Check for updates', 'arabic-music-charts' )
+		);
+
+		return $links;
+	}
+
+	/**
+	 * Force refresh plugin update data on demand.
+	 *
+	 * @return void
+	 */
+	public static function maybe_force_check() {
+		if ( ! is_admin() || ! current_user_can( 'update_plugins' ) ) {
+			return;
+		}
+
+		$plugin = isset( $_GET['amc_check_updates'] ) ? sanitize_text_field( wp_unslash( $_GET['amc_check_updates'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+
+		if ( plugin_basename( AMC_PLUGIN_FILE ) !== $plugin ) {
+			return;
+		}
+
+		check_admin_referer( 'amc_check_updates' );
+
+		self::clear_update_cache();
+		wp_clean_plugins_cache( true );
+		wp_update_plugins();
+
+		$redirect = add_query_arg(
+			array(
+				'amc_notice_type' => 'success',
+				'amc_notice'      => 'Plugin updates were checked against GitHub.',
+			),
+			admin_url( 'plugins.php' )
+		);
+
+		wp_safe_redirect( $redirect );
+		exit;
+	}
+
+	/**
+	 * Render a notice on the plugins screen after a manual check.
+	 *
+	 * @return void
+	 */
+	public static function render_plugins_notice() {
+		if ( ! is_admin() ) {
+			return;
+		}
+
+		$screen = function_exists( 'get_current_screen' ) ? get_current_screen() : null;
+
+		if ( ! $screen || 'plugins' !== $screen->id ) {
+			return;
+		}
+
+		$type    = isset( $_GET['amc_notice_type'] ) ? sanitize_key( wp_unslash( $_GET['amc_notice_type'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+		$message = isset( $_GET['amc_notice'] ) ? sanitize_text_field( wp_unslash( $_GET['amc_notice'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+
+		if ( ! $type || ! $message ) {
+			return;
+		}
+
+		$class = 'notice notice-info';
+
+		if ( 'error' === $type ) {
+			$class = 'notice notice-error';
+		} elseif ( 'success' === $type ) {
+			$class = 'notice notice-success';
+		} elseif ( 'warning' === $type ) {
+			$class = 'notice notice-warning';
+		}
+
+		printf( '<div class="%1$s is-dismissible"><p>%2$s</p></div>', esc_attr( $class ), esc_html( $message ) );
+	}
+
+	/**
+	 * Clear cached update data.
+	 *
+	 * @return void
+	 */
+	public static function clear_update_cache() {
+		delete_site_transient( 'amc_github_release_data' );
+		delete_transient( 'amc_github_release_data' );
+		delete_site_transient( 'update_plugins' );
+		delete_transient( 'update_plugins' );
+	}
+
+	/**
+	 * Get a signed URL for manual update checks.
+	 *
+	 * @return string
+	 */
+	public static function check_updates_url() {
+		return wp_nonce_url(
+			add_query_arg(
+				array(
+					'amc_check_updates' => plugin_basename( AMC_PLUGIN_FILE ),
+				),
+				admin_url( 'plugins.php' )
+			),
+			'amc_check_updates'
+		);
 	}
 
 	/**

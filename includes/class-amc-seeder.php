@@ -1,6 +1,6 @@
 <?php
 /**
- * Demo data seeding for Phase 1.
+ * Demo data seeding for plugin database tables.
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -14,143 +14,177 @@ class AMC_Seeder {
 	 * @return void
 	 */
 	public static function seed() {
-		$payload = AMC_Data::demo_payload();
-		$map     = array(
-			'artists' => array(),
-			'albums'  => array(),
-			'tracks'  => array(),
-			'charts'  => array(),
-		);
+		if ( AMC_DB::count_rows( 'charts' ) > 0 ) {
+			update_option( 'amc_demo_seeded', 1, false );
+			return;
+		}
+
+		$payload      = AMC_Data::demo_payload();
+		$definitions  = AMC_Data::chart_definitions();
+		$artist_ids   = array();
+		$album_ids    = array();
+		$track_ids    = array();
+		$chart_ids    = array();
+		$today        = '2026-03-20';
+		$last_week    = '2026-03-13';
 
 		foreach ( $payload['artists'] as $slug => $artist ) {
-			$map['artists'][ $slug ] = self::upsert_post(
-				'amc_artist',
-				$slug,
-				$artist['name'],
-				$artist['description'],
-				$artist['blurb'],
+			$artist_ids[ $slug ] = AMC_DB::save_row(
+				'artists',
 				array(
-					'_amc_country'           => $artist['country'],
-					'_amc_genres'            => $artist['genres'],
-					'_amc_monthly_listeners' => $artist['monthly'],
-					'_amc_chart_streak'      => $artist['streak'],
-					'_amc_gradient'          => $artist['gradient'],
+					'name'              => $artist['name'],
+					'slug'              => $slug,
+					'image'             => '',
+					'bio'               => $artist['description'],
+					'blurb'             => $artist['blurb'],
+					'country'           => $artist['country'],
+					'genre'             => $artist['genres'],
+					'social_links'      => '',
+					'monthly_listeners' => $artist['monthly'],
+					'chart_streak'      => $artist['streak'],
+					'gradient'          => $artist['gradient'],
+					'status'            => 'active',
 				)
 			);
 		}
 
 		foreach ( $payload['albums'] as $slug => $album ) {
-			$map['albums'][ $slug ] = self::upsert_post(
-				'amc_album',
-				$slug,
-				$album['title'],
-				$album['description'],
-				$album['description'],
+			$album_ids[ $slug ] = AMC_DB::save_row(
+				'albums',
 				array(
-					'_amc_artist_id'    => $map['artists'][ $album['artist_slug'] ],
-					'_amc_release_year' => $album['year'],
-					'_amc_gradient'     => $album['gradient'],
+					'artist_id'     => ! empty( $artist_ids[ $album['artist_slug'] ] ) ? $artist_ids[ $album['artist_slug'] ] : 0,
+					'title'         => $album['title'],
+					'slug'          => $slug,
+					'cover_image'   => '',
+					'description'   => $album['description'],
+					'release_date'  => $album['year'] . '-01-01',
+					'release_year'  => $album['year'],
+					'track_list'    => '',
+					'genre'         => '',
+					'label'         => '',
+					'gradient'      => $album['gradient'],
+					'status'        => 'active',
 				)
 			);
 		}
 
 		foreach ( $payload['tracks'] as $slug => $track ) {
-			$map['tracks'][ $slug ] = self::upsert_post(
-				'amc_track',
-				$slug,
-				$track['title'],
-				$track['description'],
-				$track['description'],
+			$track_ids[ $slug ] = AMC_DB::save_row(
+				'tracks',
 				array(
-					'_amc_artist_id' => $map['artists'][ $track['artist_slug'] ],
-					'_amc_album_id'  => ! empty( $track['album_slug'] ) && ! empty( $map['albums'][ $track['album_slug'] ] ) ? $map['albums'][ $track['album_slug'] ] : '',
-					'_amc_duration'  => $track['duration'],
-					'_amc_gradient'  => $track['gradient'],
+					'artist_id'    => ! empty( $artist_ids[ $track['artist_slug'] ] ) ? $artist_ids[ $track['artist_slug'] ] : 0,
+					'album_id'     => ! empty( $track['album_slug'] ) && ! empty( $album_ids[ $track['album_slug'] ] ) ? $album_ids[ $track['album_slug'] ] : 0,
+					'title'        => $track['title'],
+					'slug'         => $slug,
+					'cover_image'  => '',
+					'description'  => $track['description'],
+					'isrc'         => '',
+					'aliases'      => '',
+					'release_date' => '2026-01-01',
+					'genre'        => '',
+					'duration'     => $track['duration'],
+					'gradient'     => $track['gradient'],
+					'status'       => 'active',
 				)
 			);
 		}
 
-		foreach ( AMC_Data::chart_definitions() as $slug => $chart ) {
-			$entries            = array();
-			$payload_entries    = isset( $payload['charts'][ $slug ]['entries'] ) ? $payload['charts'][ $slug ]['entries'] : array();
-			$map_key_lookup     = array(
-				'artist' => 'artists',
-				'track'  => 'tracks',
-				'album'  => 'albums',
+		foreach ( $definitions as $slug => $definition ) {
+			$chart_ids[ $slug ] = AMC_DB::save_row(
+				'charts',
+				array(
+					'name'             => $definition['title'],
+					'slug'             => $slug,
+					'description'      => $definition['description'],
+					'type'             => $definition['type'],
+					'cover_image'      => '',
+					'display_order'    => count( $chart_ids ) + 1,
+					'status'           => 'active',
+					'is_featured_home' => in_array( $slug, array( 'top-artists', 'top-tracks', 'hot-100-tracks' ), true ) ? 1 : 0,
+					'archive_enabled'  => 1,
+					'accent'           => $definition['accent'],
+					'kicker'           => $definition['kicker'],
+				)
 			);
 
-			foreach ( $payload_entries as $entry ) {
-				$bucket = $map_key_lookup[ $entry['entity_type'] ];
+			$current_week_id = AMC_DB::save_row(
+				'chart_weeks',
+				array(
+					'chart_id'      => $chart_ids[ $slug ],
+					'week_date'     => $today,
+					'status'        => 'published',
+					'is_featured'   => 'hot-100-tracks' === $slug ? 1 : 0,
+					'notes'         => 'Auto-seeded published week',
+					'published_at'  => current_time( 'mysql' ),
+					'archived_at'   => null,
+				)
+			);
 
-				$entries[] = array(
+			$archived_week_id = AMC_DB::save_row(
+				'chart_weeks',
+				array(
+					'chart_id'      => $chart_ids[ $slug ],
+					'week_date'     => $last_week,
+					'status'        => 'archived',
+					'is_featured'   => 0,
+					'notes'         => 'Auto-seeded archive week',
+					'published_at'  => current_time( 'mysql' ),
+					'archived_at'   => current_time( 'mysql' ),
+				)
+			);
+
+			if ( empty( $payload['charts'][ $slug ]['entries'] ) ) {
+				continue;
+			}
+
+			foreach ( $payload['charts'][ $slug ]['entries'] as $index => $entry ) {
+				$entity_id = 0;
+
+				if ( 'artist' === $entry['entity_type'] && ! empty( $artist_ids[ $entry['slug'] ] ) ) {
+					$entity_id = $artist_ids[ $entry['slug'] ];
+				} elseif ( 'track' === $entry['entity_type'] && ! empty( $track_ids[ $entry['slug'] ] ) ) {
+					$entity_id = $track_ids[ $entry['slug'] ];
+				} elseif ( 'album' === $entry['entity_type'] && ! empty( $album_ids[ $entry['slug'] ] ) ) {
+					$entity_id = $album_ids[ $entry['slug'] ];
+				}
+
+				$entry_data = array(
 					'entity_type'    => $entry['entity_type'],
-					'entity_id'      => $map[ $bucket ][ $entry['slug'] ],
+					'entity_id'      => $entity_id,
 					'current_rank'   => $entry['current_rank'],
-					'last_rank'      => $entry['last_rank'],
+					'previous_rank'  => $entry['last_rank'],
 					'peak_rank'      => $entry['peak_rank'],
 					'weeks_on_chart' => $entry['weeks_on_chart'],
 					'movement'       => $entry['movement'],
+					'score'          => 100 - $index,
+					'artwork'        => '',
 				);
+
+				AMC_DB::save_row( 'chart_entries', array_merge( $entry_data, array( 'chart_week_id' => $current_week_id ) ) );
+
+				$archived_entry = $entry_data;
+				$archived_entry['chart_week_id']   = $archived_week_id;
+				$archived_entry['current_rank']    = max( 1, $entry['current_rank'] + ( 'up' === $entry['movement'] ? 1 : -1 ) );
+				$archived_entry['previous_rank']   = $entry['current_rank'];
+				$archived_entry['movement']        = 'same';
+				$archived_entry['score']           = 95 - $index;
+				AMC_DB::save_row( 'chart_entries', $archived_entry );
 			}
-
-			$chart_id = self::upsert_post(
-				'amc_chart',
-				$slug,
-				$chart['title'],
-				$chart['description'],
-				$chart['kicker'],
-				array(
-					'_amc_chart_type'    => $chart['type'],
-					'_amc_chart_accent'  => $chart['accent'],
-					'_amc_chart_entries' => $entries,
-				)
-			);
-
-			wp_set_object_terms( $chart_id, array( sanitize_title( $chart['type'] ) ), 'amc_chart_group', false );
-			$map['charts'][ $slug ] = $chart_id;
 		}
 
-		update_option( 'amc_demo_seeded', 1, false );
-	}
-
-	/**
-	 * Insert or update post with meta.
-	 *
-	 * @param string $post_type Post type.
-	 * @param string $slug Post slug.
-	 * @param string $title Post title.
-	 * @param string $content Post content.
-	 * @param string $excerpt Post excerpt.
-	 * @param array  $meta Meta values.
-	 * @return int
-	 */
-	private static function upsert_post( $post_type, $slug, $title, $content, $excerpt, $meta ) {
-		$existing = get_page_by_path( $slug, OBJECT, $post_type );
-
-		$postarr = array(
-			'post_type'    => $post_type,
-			'post_name'    => $slug,
-			'post_title'   => $title,
-			'post_content' => $content,
-			'post_excerpt' => $excerpt,
-			'post_status'  => 'publish',
+		AMC_DB::save_settings(
+			array(
+				'platform_name'    => 'Kontentainment Charts',
+				'logo'             => 'kontentainment-charts-mark.svg',
+				'seo_defaults'     => 'Enable chart-specific metadata',
+				'social_image'     => 'weekly-share-default.jpg',
+				'homepage_chart'   => 'hot-100-tracks',
+				'methodology_text' => 'Custom weighted methodology summary',
+				'language'         => 'English',
+				'date_format'      => 'F j, Y',
+			)
 		);
 
-		if ( $existing ) {
-			$postarr['ID'] = $existing->ID;
-			$post_id       = wp_update_post( $postarr );
-		} else {
-			$post_id = wp_insert_post( $postarr );
-		}
-
-		if ( is_wp_error( $post_id ) ) {
-			return 0;
-		}
-
-		foreach ( $meta as $key => $value ) {
-			update_post_meta( $post_id, $key, $value );
-		}
-
-		return (int) $post_id;
+		update_option( 'amc_demo_seeded', 1, false );
 	}
 }
