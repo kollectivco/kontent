@@ -111,6 +111,7 @@ class AMC_Seeder {
 				'chart_weeks',
 				array(
 					'chart_id'      => $chart_ids[ $slug ],
+					'country'       => 'Global',
 					'week_date'     => $today,
 					'status'        => 'published',
 					'is_featured'   => 'hot-100-tracks' === $slug ? 1 : 0,
@@ -124,6 +125,7 @@ class AMC_Seeder {
 				'chart_weeks',
 				array(
 					'chart_id'      => $chart_ids[ $slug ],
+					'country'       => 'Global',
 					'week_date'     => $last_week,
 					'status'        => 'archived',
 					'is_featured'   => 0,
@@ -157,6 +159,8 @@ class AMC_Seeder {
 					'weeks_on_chart' => $entry['weeks_on_chart'],
 					'movement'       => $entry['movement'],
 					'score'          => 100 - $index,
+					'score_change'   => 0,
+					'source_count'   => 1,
 					'artwork'        => '',
 				);
 
@@ -168,6 +172,8 @@ class AMC_Seeder {
 				$archived_entry['previous_rank']   = $entry['current_rank'];
 				$archived_entry['movement']        = 'same';
 				$archived_entry['score']           = 95 - $index;
+				$archived_entry['score_change']    = 0;
+				$archived_entry['source_count']    = 1;
 				AMC_DB::save_row( 'chart_entries', $archived_entry );
 			}
 		}

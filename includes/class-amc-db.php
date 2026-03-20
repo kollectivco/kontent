@@ -11,7 +11,7 @@ class AMC_DB {
 	/**
 	 * Database version.
 	 */
-	const VERSION = '1.1.0';
+	const VERSION = '1.2.0';
 
 	/**
 	 * Table suffixes.
@@ -174,6 +174,7 @@ class AMC_DB {
 			"CREATE TABLE {$chart_weeks} (
 				id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
 				chart_id bigint(20) unsigned NOT NULL,
+				country varchar(64) NOT NULL DEFAULT 'Global',
 				week_date date NOT NULL,
 				status varchar(20) NOT NULL DEFAULT 'draft',
 				is_featured tinyint(1) NOT NULL DEFAULT 0,
@@ -183,8 +184,9 @@ class AMC_DB {
 				created_at datetime NOT NULL,
 				updated_at datetime NOT NULL,
 				PRIMARY KEY  (id),
-				UNIQUE KEY chart_week (chart_id, week_date),
+				UNIQUE KEY chart_week (chart_id, country, week_date),
 				KEY chart_id (chart_id),
+				KEY country (country),
 				KEY status (status),
 				KEY week_date (week_date)
 			) {$charset_collate};"
@@ -202,6 +204,8 @@ class AMC_DB {
 				weeks_on_chart int(11) NOT NULL DEFAULT 0,
 				movement varchar(20) NOT NULL DEFAULT 'same',
 				score decimal(10,2) NOT NULL DEFAULT 0.00,
+				score_change decimal(10,2) NOT NULL DEFAULT 0.00,
+				source_count int(11) NOT NULL DEFAULT 0,
 				artwork varchar(255) NULL,
 				created_at datetime NOT NULL,
 				updated_at datetime NOT NULL,
@@ -227,13 +231,19 @@ class AMC_DB {
 			"CREATE TABLE {$source_uploads} (
 				id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
 				source_name varchar(191) NOT NULL,
+				source_platform varchar(64) NOT NULL DEFAULT '',
+				country varchar(64) NOT NULL DEFAULT 'Global',
 				chart_week varchar(32) NOT NULL,
+				chart_date date NULL,
+				target_chart_id bigint(20) unsigned NOT NULL DEFAULT 0,
+				chart_type varchar(20) NOT NULL DEFAULT 'track',
 				file_name varchar(255) NOT NULL,
 				file_path text NOT NULL,
 				file_url text NOT NULL,
 				mime_type varchar(191) NULL,
 				file_size bigint(20) unsigned NOT NULL DEFAULT 0,
 				file_status varchar(20) NOT NULL DEFAULT 'uploaded',
+				generated_week_id bigint(20) unsigned NOT NULL DEFAULT 0,
 				row_count int(11) NOT NULL DEFAULT 0,
 				preview_text text NULL,
 				uploader_id bigint(20) unsigned NOT NULL DEFAULT 0,
@@ -243,7 +253,12 @@ class AMC_DB {
 				updated_at datetime NOT NULL,
 				PRIMARY KEY  (id),
 				KEY file_status (file_status),
-				KEY chart_week (chart_week)
+				KEY chart_week (chart_week),
+				KEY chart_date (chart_date),
+				KEY source_platform (source_platform),
+				KEY target_chart_id (target_chart_id),
+				KEY chart_type (chart_type),
+				KEY country (country)
 			) {$charset_collate};"
 		);
 
@@ -253,6 +268,24 @@ class AMC_DB {
 				upload_id bigint(20) unsigned NOT NULL,
 				row_index int(11) NOT NULL DEFAULT 0,
 				raw_data longtext NULL,
+				raw_row_json longtext NULL,
+				chart_date date NULL,
+				source_platform varchar(64) NOT NULL DEFAULT '',
+				country varchar(64) NOT NULL DEFAULT 'Global',
+				target_chart_id bigint(20) unsigned NOT NULL DEFAULT 0,
+				chart_type varchar(20) NOT NULL DEFAULT 'track',
+				rank int(11) NOT NULL DEFAULT 0,
+				previous_rank int(11) NOT NULL DEFAULT 0,
+				peak_rank int(11) NOT NULL DEFAULT 0,
+				weeks_on_chart int(11) NOT NULL DEFAULT 0,
+				track_title varchar(191) NULL,
+				artist_name varchar(191) NULL,
+				artist_names text NULL,
+				album_name varchar(191) NULL,
+				source_metric_value decimal(18,4) NOT NULL DEFAULT 0.0000,
+				growth varchar(64) NULL,
+				source_url text NULL,
+				source_uri text NULL,
 				normalized_title varchar(191) NULL,
 				normalized_artist varchar(191) NULL,
 				normalized_album varchar(191) NULL,
@@ -266,6 +299,10 @@ class AMC_DB {
 				updated_at datetime NOT NULL,
 				PRIMARY KEY  (id),
 				KEY upload_id (upload_id),
+				KEY target_chart_id (target_chart_id),
+				KEY chart_date (chart_date),
+				KEY source_platform (source_platform),
+				KEY chart_type (chart_type),
 				KEY normalized_title (normalized_title),
 				KEY normalized_artist (normalized_artist),
 				KEY matching_status (matching_status)
@@ -543,6 +580,7 @@ class AMC_DB {
 
 		$defaults = array(
 			'chart_id' => 0,
+			'country'  => '',
 			'status'   => '',
 			'order_by' => 'week_date DESC, id DESC',
 		);
@@ -559,6 +597,11 @@ class AMC_DB {
 		if ( ! empty( $args['status'] ) ) {
 			$where[]  = 'status = %s';
 			$values[] = $args['status'];
+		}
+
+		if ( ! empty( $args['country'] ) ) {
+			$where[]  = 'country = %s';
+			$values[] = $args['country'];
 		}
 
 		$sql = "SELECT * FROM {$table}";

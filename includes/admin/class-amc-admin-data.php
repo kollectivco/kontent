@@ -113,10 +113,11 @@ class AMC_Admin_Data {
 		return array_map(
 			function ( $row ) {
 				$user = ! empty( $row['uploader_id'] ) ? get_user_by( 'id', (int) $row['uploader_id'] ) : null;
+				$chart = ! empty( $row['target_chart_id'] ) ? AMC_DB::get_row( 'charts', (int) $row['target_chart_id'] ) : null;
 
 				return array(
-					'source'     => $row['source_name'],
-					'chart_week' => $row['chart_week'],
+					'source'     => AMC_Ingestion::platform_label( ! empty( $row['source_platform'] ) ? $row['source_platform'] : $row['source_name'] ),
+					'chart_week' => trim( $row['country'] . ' / ' . $row['chart_week'] . ( $chart ? ' / ' . $chart['name'] : '' ), ' /' ),
 					'status'     => ucfirst( $row['file_status'] ),
 					'rows'       => (int) $row['row_count'],
 					'uploader'   => $user ? $user->display_name : 'System',
@@ -316,14 +317,22 @@ class AMC_Admin_Data {
 		return array_map(
 			function ( $row ) {
 				$user = ! empty( $row['uploader_id'] ) ? get_user_by( 'id', (int) $row['uploader_id'] ) : null;
+				$chart = ! empty( $row['target_chart_id'] ) ? AMC_DB::get_row( 'charts', (int) $row['target_chart_id'] ) : null;
 
 				return array(
 					'id'          => (int) $row['id'],
-					'source'      => $row['source_name'],
+					'source'      => AMC_Ingestion::platform_label( ! empty( $row['source_platform'] ) ? $row['source_platform'] : $row['source_name'] ),
+					'source_platform' => ! empty( $row['source_platform'] ) ? $row['source_platform'] : sanitize_title( $row['source_name'] ),
 					'upload_date' => $row['created_at'],
 					'week'        => $row['chart_week'],
+					'country'     => ! empty( $row['country'] ) ? $row['country'] : 'Global',
+					'chart_date'  => ! empty( $row['chart_date'] ) ? $row['chart_date'] : $row['chart_week'],
+					'chart'       => $chart ? $chart['name'] : 'Unknown chart',
+					'chart_type'  => ucfirst( $row['chart_type'] ),
+					'target_chart_id' => (int) $row['target_chart_id'],
 					'status'      => ucfirst( $row['file_status'] ),
 					'raw_status'  => $row['file_status'],
+					'generated_week_id' => (int) $row['generated_week_id'],
 					'row_count'   => (int) $row['row_count'],
 					'preview'     => $row['error_message'] ? $row['error_message'] : $row['preview_text'],
 					'uploader'    => $user ? $user->display_name : 'System',
@@ -347,15 +356,16 @@ class AMC_Admin_Data {
 		return array_map(
 			function ( $row ) {
 				$source_row = AMC_DB::get_row( 'source_rows', (int) $row['source_row_id'] );
-				$candidate  = trim( ( ! empty( $source_row['normalized_title'] ) ? $source_row['normalized_title'] : 'Unknown title' ) . ' / ' . ( ! empty( $source_row['normalized_artist'] ) ? $source_row['normalized_artist'] : 'Unknown artist' ), ' /' );
+				$candidate  = trim( ( ! empty( $source_row['track_title'] ) ? $source_row['track_title'] : ( ! empty( $source_row['artist_name'] ) ? $source_row['artist_name'] : 'Unknown candidate' ) ) . ' / ' . ( ! empty( $source_row['artist_names'] ) ? $source_row['artist_names'] : '' ), ' /' );
 				$upload     = AMC_DB::get_row( 'source_uploads', (int) $row['upload_id'] );
+				$chart      = ( $upload && ! empty( $upload['target_chart_id'] ) ) ? AMC_DB::get_row( 'charts', (int) $upload['target_chart_id'] ) : null;
 
 				return array(
 					'id'         => (int) $row['id'],
 					'candidate'  => $candidate,
 					'type'       => ucfirst( $row['entity_type'] ),
 					'confidence' => $row['confidence'] . '%',
-					'sources'    => $upload ? $upload['source_name'] : 'Unknown source',
+					'sources'    => $upload ? trim( AMC_Ingestion::platform_label( ! empty( $upload['source_platform'] ) ? $upload['source_platform'] : $upload['source_name'] ) . ' / ' . $upload['country'] . ' / ' . $upload['chart_week'] . ( $chart ? ' / ' . $chart['name'] : '' ), ' /' ) : 'Unknown source',
 					'status'     => ucwords( str_replace( '_', ' ', $row['status'] ) ),
 					'raw_status' => $row['status'],
 					'queue'      => $row,
@@ -392,33 +402,40 @@ class AMC_Admin_Data {
 		}
 
 		$entries = AMC_DB::get_chart_entries( (int) $week['id'] );
+		$chart   = AMC_DB::get_row( 'charts', (int) $week['chart_id'] );
 		$new     = 0;
-		$hidden  = 0;
+		$reentry = 0;
 		$jump    = 0;
+		$dropout = 0;
 
 		foreach ( $entries as $entry ) {
 			if ( 'new' === $entry['movement'] ) {
 				++$new;
 			}
 
+			if ( 're-entry' === $entry['movement'] ) {
+				++$reentry;
+			}
+
 			if ( absint( $entry['previous_rank'] ) > 0 ) {
 				$jump = max( $jump, absint( $entry['previous_rank'] ) - absint( $entry['current_rank'] ) );
 			}
 
-			if ( empty( $entry['artwork'] ) ) {
-				++$hidden;
+			if ( absint( $entry['score_change'] ) < 0 ) {
+				++$dropout;
 			}
 		}
 
 		return array(
-			'current_week'   => 'Week of ' . wp_date( 'F j, Y', strtotime( $week['week_date'] ) ),
+			'current_week'   => trim( ( $chart ? $chart['name'] : 'Chart' ) . ' / ' . $week['country'] . ' / Week of ' . wp_date( 'F j, Y', strtotime( $week['week_date'] ) ), ' /' ),
 			'comparison'     => array(
 				array( 'metric' => 'New entries', 'value' => (string) $new ),
+				array( 'metric' => 'Re-entries', 'value' => (string) $reentry ),
 				array( 'metric' => 'Biggest jump', 'value' => $jump ? '+' . $jump . ' positions' : 'No upward movement' ),
-				array( 'metric' => 'Fallback artwork', 'value' => (string) $hidden ),
+				array( 'metric' => 'Negative score changes', 'value' => (string) $dropout ),
 				array( 'metric' => 'Status', 'value' => ucfirst( $week['status'] ) ),
 			),
-			'actions'        => array( 'Preview Draft', 'Compare With Previous Week', 'Publish Week', 'Unpublish Week', 'Feature On Homepage' ),
+			'actions'        => array( 'Generate Draft', 'Preview Draft', 'Compare With Previous Week', 'Publish Week', 'Unpublish Week', 'Feature On Homepage' ),
 		);
 	}
 
@@ -570,8 +587,10 @@ class AMC_Admin_Data {
 					'previous' => (int) $row['previous_rank'],
 					'peak'     => (int) $row['peak_rank'],
 					'weeks'    => (int) $row['weeks_on_chart'],
-					'movement' => ucfirst( $row['movement'] ),
+					'movement' => ucwords( str_replace( '-', ' ', $row['movement'] ) ),
 					'score'    => (string) $row['score'],
+					'score_change' => (string) $row['score_change'],
+					'source_count' => (int) $row['source_count'],
 					'status'   => $entity ? 'Connected' : 'Missing',
 					'entity_type' => $row['entity_type'],
 					'entity_id'   => (int) $row['entity_id'],
