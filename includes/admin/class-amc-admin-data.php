@@ -364,7 +364,7 @@ class AMC_Admin_Data {
 					'id'         => (int) $row['id'],
 					'candidate'  => $candidate,
 					'type'       => ucfirst( $row['entity_type'] ),
-					'confidence' => $row['confidence'] . '%',
+					'confidence' => $row['confidence'] . '%' . ( ! empty( $row['notes'] ) ? ' / ' . $row['notes'] : '' ),
 					'sources'    => $upload ? trim( AMC_Ingestion::platform_label( ! empty( $upload['source_platform'] ) ? $upload['source_platform'] : $upload['source_name'] ) . ' / ' . $upload['country'] . ' / ' . $upload['chart_week'] . ( $chart ? ' / ' . $chart['name'] : '' ), ' /' ) : 'Unknown source',
 					'status'     => ucwords( str_replace( '_', ' ', $row['status'] ) ),
 					'raw_status' => $row['status'],
@@ -401,12 +401,13 @@ class AMC_Admin_Data {
 			);
 		}
 
-		$entries = AMC_DB::get_chart_entries( (int) $week['id'] );
-		$chart   = AMC_DB::get_row( 'charts', (int) $week['chart_id'] );
-		$new     = 0;
-		$reentry = 0;
-		$jump    = 0;
-		$dropout = 0;
+		$entries  = AMC_DB::get_chart_entries( (int) $week['id'] );
+		$chart    = AMC_DB::get_row( 'charts', (int) $week['chart_id'] );
+		$dropped  = ! empty( $week['dropped_out_json'] ) ? json_decode( $week['dropped_out_json'], true ) : array();
+		$new      = 0;
+		$reentry  = 0;
+		$jump     = 0;
+		$dropout  = is_array( $dropped ) ? count( $dropped ) : 0;
 
 		foreach ( $entries as $entry ) {
 			if ( 'new' === $entry['movement'] ) {
@@ -420,10 +421,6 @@ class AMC_Admin_Data {
 			if ( absint( $entry['previous_rank'] ) > 0 ) {
 				$jump = max( $jump, absint( $entry['previous_rank'] ) - absint( $entry['current_rank'] ) );
 			}
-
-			if ( absint( $entry['score_change'] ) < 0 ) {
-				++$dropout;
-			}
 		}
 
 		return array(
@@ -432,10 +429,11 @@ class AMC_Admin_Data {
 				array( 'metric' => 'New entries', 'value' => (string) $new ),
 				array( 'metric' => 'Re-entries', 'value' => (string) $reentry ),
 				array( 'metric' => 'Biggest jump', 'value' => $jump ? '+' . $jump . ' positions' : 'No upward movement' ),
-				array( 'metric' => 'Negative score changes', 'value' => (string) $dropout ),
+				array( 'metric' => 'Dropped out', 'value' => (string) $dropout ),
 				array( 'metric' => 'Status', 'value' => ucfirst( $week['status'] ) ),
 			),
 			'actions'        => array( 'Generate Draft', 'Preview Draft', 'Compare With Previous Week', 'Publish Week', 'Unpublish Week', 'Feature On Homepage' ),
+			'dropped_out'    => is_array( $dropped ) ? $dropped : array(),
 		);
 	}
 

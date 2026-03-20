@@ -35,6 +35,7 @@ class AMC_Seeder {
 					'name'              => $artist['name'],
 					'slug'              => $slug,
 					'image'             => '',
+					'aliases'           => '',
 					'bio'               => $artist['description'],
 					'blurb'             => $artist['blurb'],
 					'country'           => $artist['country'],

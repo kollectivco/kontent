@@ -29,6 +29,10 @@ class AMC_Ingestion {
 			array( 'rule_group' => 'methodology', 'rule_key' => 'minimum_source_coverage', 'rule_value' => 'At least 2 eligible sources', 'rule_type' => 'text', 'sort_order' => 11 ),
 			array( 'rule_group' => 'methodology', 'rule_key' => 'manual_editorial_override', 'rule_value' => 'Allowed with approval note', 'rule_type' => 'text', 'sort_order' => 12 ),
 			array( 'rule_group' => 'methodology', 'rule_key' => 'catalog_reentry_threshold', 'rule_value' => '85 methodology score', 'rule_type' => 'text', 'sort_order' => 13 ),
+			array( 'rule_group' => 'methodology', 'rule_key' => 'growth_bonus_multiplier', 'rule_value' => '1.0', 'rule_type' => 'number', 'sort_order' => 14 ),
+			array( 'rule_group' => 'methodology', 'rule_key' => 'fallback_metric_behavior', 'rule_value' => 'Use rank fallback when source metric is missing', 'rule_type' => 'text', 'sort_order' => 15 ),
+			array( 'rule_group' => 'methodology', 'rule_key' => 'minimum_source_count', 'rule_value' => '1', 'rule_type' => 'number', 'sort_order' => 16 ),
+			array( 'rule_group' => 'methodology', 'rule_key' => 'eligibility_mode', 'rule_value' => 'Allow single-source entries unless minimum source count blocks them', 'rule_type' => 'text', 'sort_order' => 17 ),
 		);
 
 		foreach ( $defaults as $rule ) {
@@ -136,26 +140,25 @@ class AMC_Ingestion {
 
 		$ext = strtolower( pathinfo( $upload['file_name'], PATHINFO_EXTENSION ) );
 
-		if ( in_array( $ext, array( 'xlsx', 'xls' ), true ) ) {
-			self::fail_upload( $upload_id, 'Spreadsheet parsing is not supported yet. Please upload CSV, TSV, or TXT exports only.', 'unsupported-spreadsheet' );
+		if ( ! in_array( $ext, array( 'csv', 'txt', 'tsv', 'xlsx', 'xls' ), true ) ) {
+			self::fail_upload( $upload_id, 'This file type is unsupported. Use CSV, TSV, TXT, XLSX, or XLS exports.', 'unsupported-file' );
 			return false;
 		}
 
-		if ( ! in_array( $ext, array( 'csv', 'txt', 'tsv' ), true ) ) {
-			self::fail_upload( $upload_id, 'This file type is unsupported. Use CSV, TSV, or TXT exports.', 'unsupported-file' );
+		$rows = self::read_tabular_rows( $upload['file_path'], $ext );
+
+		if ( empty( $rows['success'] ) ) {
+			self::fail_upload( $upload_id, $rows['message'], ! empty( $rows['parser_name'] ) ? $rows['parser_name'] : 'read-failure' );
 			return false;
 		}
 
-		$delimiter = 'tsv' === $ext ? "\t" : ',';
-		$rows      = self::read_delimited_rows( $upload['file_path'], $delimiter );
-
-		if ( empty( $rows ) ) {
+		if ( empty( $rows['rows'] ) ) {
 			self::fail_upload( $upload_id, 'No parsable rows were found in the uploaded file.', 'empty-file' );
 			return false;
 		}
 
-		$headers       = self::extract_headers( array_shift( $rows ), $upload['source_platform'] );
-		$parser_result = self::parse_rows_for_upload( $upload, $headers, $rows );
+		$headers       = self::extract_headers( array_shift( $rows['rows'] ), $upload['source_platform'] );
+		$parser_result = self::parse_rows_for_upload( $upload, $headers, $rows['rows'] );
 
 		if ( empty( $parser_result['success'] ) ) {
 			self::fail_upload( $upload_id, $parser_result['message'], $parser_result['parser_name'] );
@@ -190,6 +193,8 @@ class AMC_Ingestion {
 					'growth'               => $mapped['growth'],
 					'source_url'           => $mapped['source_url'],
 					'source_uri'           => $mapped['source_uri'],
+					'validation_status'    => ! empty( $mapped['validation_status'] ) ? $mapped['validation_status'] : 'valid',
+					'validation_message'   => ! empty( $mapped['validation_message'] ) ? $mapped['validation_message'] : '',
 					'normalized_title'     => $mapped['normalized_title'],
 					'normalized_artist'    => $mapped['normalized_artist'],
 					'normalized_album'     => $mapped['normalized_album'],
@@ -199,11 +204,17 @@ class AMC_Ingestion {
 					'matched_entity_type'  => '',
 					'matched_entity_id'    => 0,
 					'matching_status'      => 'pending',
+					'match_confidence'     => 0,
+					'match_confidence_label' => '',
 				)
 			);
 
 			if ( $row_id && count( $preview ) < 5 ) {
 				$preview[] = self::preview_label_for_row( $mapped );
+			}
+
+			if ( ! empty( $mapped['validation_status'] ) && 'valid' !== $mapped['validation_status'] ) {
+				self::log( $upload_id, (int) $row_id, 'validation', 'warning', $mapped['validation_message'], array( 'row_index' => $index + 1 ) );
 			}
 
 			++$count;
@@ -246,27 +257,72 @@ class AMC_Ingestion {
 		$wpdb->delete( AMC_DB::table( 'matching_queue' ), array( 'upload_id' => absint( $upload_id ) ) );
 
 		foreach ( $rows as $row ) {
-			$candidate = 'artist' === $row['chart_type'] ? self::find_artist_candidate( $row ) : self::find_track_candidate( $row );
-			$type      = 'artist' === $row['chart_type'] ? 'artist' : 'track';
-			$basis     = 'No exact candidate';
-			$entity_id = 0;
-			$label     = '';
+			$type       = 'artist' === $row['chart_type'] ? 'artist' : 'track';
+			$basis      = 'No match candidate';
+			$entity_id  = 0;
+			$label      = '';
 			$confidence = 0;
-			$status    = 'pending';
+			$status     = 'pending';
+			$level      = '';
 
-			if ( $candidate ) {
-				$entity_id  = (int) $candidate['id'];
-				$label      = 'artist' === $type ? $candidate['name'] : $candidate['title'];
-				$basis      = 'Exact normalized metadata match';
-				$confidence = 'artist' === $type ? 93 : 97;
-				$status     = 'approved';
-
+			if ( ! empty( $row['validation_status'] ) && 'valid' !== $row['validation_status'] ) {
 				AMC_DB::save_row(
 					'source_rows',
 					array(
-						'matched_entity_type' => $type,
-						'matched_entity_id'   => $entity_id,
-						'matching_status'     => 'matched',
+						'matching_status'       => 'invalid',
+						'match_confidence'      => 0,
+						'match_confidence_label'=> 'invalid',
+					),
+					(int) $row['id']
+				);
+				continue;
+			}
+
+			$candidate_result = 'artist' === $type ? self::find_artist_candidate( $row ) : self::find_track_candidate( $row );
+
+			if ( ! empty( $candidate_result['candidate'] ) ) {
+				$candidate  = $candidate_result['candidate'];
+				$entity_id  = (int) $candidate['id'];
+				$label      = 'artist' === $type ? $candidate['name'] : $candidate['title'];
+				$basis      = $candidate_result['basis'];
+				$confidence = (float) $candidate_result['confidence'];
+				$level      = $candidate_result['level'];
+
+				if ( in_array( $level, array( 'exact', 'high confidence' ), true ) ) {
+					$status = 'approved';
+					AMC_DB::save_row(
+						'source_rows',
+						array(
+							'matched_entity_type'    => $type,
+							'matched_entity_id'      => $entity_id,
+							'matching_status'        => 'matched',
+							'match_confidence'       => $confidence,
+							'match_confidence_label' => $level,
+						),
+						(int) $row['id']
+					);
+				} else {
+					$status = 'review_needed';
+					AMC_DB::save_row(
+						'source_rows',
+						array(
+							'matched_entity_type'    => '',
+							'matched_entity_id'      => 0,
+							'matching_status'        => 'review_needed',
+							'match_confidence'       => $confidence,
+							'match_confidence_label' => $level,
+						),
+						(int) $row['id']
+					);
+					self::log( $upload_id, (int) $row['id'], 'matching_review', 'warning', 'Ambiguous match sent to review queue.', array( 'confidence' => $confidence, 'label' => $label ) );
+				}
+			} else {
+				AMC_DB::save_row(
+					'source_rows',
+					array(
+						'matching_status'        => 'pending',
+						'match_confidence'       => 0,
+						'match_confidence_label' => 'no match',
 					),
 					(int) $row['id']
 				);
@@ -285,7 +341,7 @@ class AMC_Ingestion {
 					'status'               => $status,
 					'override_entity_type' => '',
 					'override_entity_id'   => 0,
-					'notes'                => '',
+					'notes'                => $level ? 'Confidence: ' . $level : '',
 				)
 			);
 		}
@@ -433,6 +489,12 @@ class AMC_Ingestion {
 
 		$aggregate           = self::aggregate_generation_rows( $rows );
 		$ranked              = self::rank_aggregate_rows( $aggregate );
+
+		if ( empty( $ranked ) ) {
+			self::log( 0, 0, 'generation', 'warning', 'Generation produced no eligible entries after methodology filters.', array( 'chart_id' => $chart_id, 'country' => $country, 'chart_date' => $chart_date ) );
+			return array( 'success' => false, 'message' => 'No eligible entries remained after applying scoring and eligibility rules.' );
+		}
+
 		$previous_week       = self::get_previous_chart_week( $chart_id, $country, $chart_date );
 		$previous_entries    = $previous_week ? AMC_DB::get_chart_entries( (int) $previous_week['id'] ) : array();
 		$comparison          = self::build_trend_payload( $ranked, $previous_entries, $chart_id, $country );
@@ -469,6 +531,28 @@ class AMC_Ingestion {
 				'published_at' => null,
 				'archived_at'  => null,
 				'notes'        => sprintf( 'Generated from %1$d approved source rows across %2$d uploads.', $generated_from_rows, count( $comparison['upload_ids'] ) ),
+				'comparison_summary' => wp_json_encode(
+					array(
+						'new_entries'  => count(
+							array_filter(
+								$comparison['entries'],
+								function ( $entry ) {
+									return 'new' === $entry['movement'];
+								}
+							)
+						),
+						're_entries'   => count(
+							array_filter(
+								$comparison['entries'],
+								function ( $entry ) {
+									return 're-entry' === $entry['movement'];
+								}
+							)
+						),
+						'dropped_out'  => count( $comparison['dropped_out'] ),
+					)
+				),
+				'dropped_out_json' => wp_json_encode( $comparison['dropped_out'] ),
 			),
 			$current_week_id
 		);
@@ -682,6 +766,7 @@ class AMC_Ingestion {
 	public static function save_scoring_rules( $payload ) {
 		$current         = self::get_scoring_rules();
 		$current_weights = array();
+		$warnings        = array();
 
 		foreach ( $current['weights'] as $weight ) {
 			$current_weights[ $weight['key'] ] = $weight['value'];
@@ -706,13 +791,29 @@ class AMC_Ingestion {
 			'minimum_source_coverage',
 			'manual_editorial_override',
 			'catalog_reentry_threshold',
+			'growth_bonus_multiplier',
+			'fallback_metric_behavior',
+			'minimum_source_count',
+			'eligibility_mode',
 		);
 
 		foreach ( $methods as $index => $key ) {
 			$fallback = isset( $current['methodology'][ self::humanize_rule_key( $key ) ] ) ? $current['methodology'][ self::humanize_rule_key( $key ) ] : '';
 			$value    = isset( $payload[ $key ] ) ? sanitize_textarea_field( wp_unslash( $payload[ $key ] ) ) : $fallback;
-			self::upsert_rule( 'methodology', $key, $value, 'text', 10 + $index );
+			$type     = in_array( $key, array( 'growth_bonus_multiplier', 'minimum_source_count' ), true ) ? 'number' : 'text';
+
+			if ( 'number' === $type && '' !== trim( (string) $value ) && ! is_numeric( $value ) ) {
+				self::log( 0, 0, 'scoring', 'warning', 'Invalid scoring rule value ignored.', array( 'rule_key' => $key, 'value' => $value ) );
+				$warnings[] = $key;
+				$value = $fallback;
+			}
+
+			self::upsert_rule( 'methodology', $key, $value, $type, 10 + $index );
 		}
+
+		return array(
+			'warnings' => $warnings,
+		);
 	}
 
 	/**
@@ -760,6 +861,10 @@ class AMC_Ingestion {
 		);
 
 		if ( 'youtube' === $platform && 'artist' === $chart_type ) {
+			$validation = self::validate_required_columns( $headers, array( array( 'artist', 'artist_name', 'name', 'channel', 'channel_name' ), array( 'rank', 'position', 'current_rank' ) ), 'YouTube Top Artists' );
+			if ( ! empty( $validation ) ) {
+				return $validation;
+			}
 			return array(
 				'success'     => true,
 				'parser_name' => 'youtube-top-artists-csv',
@@ -768,6 +873,10 @@ class AMC_Ingestion {
 		}
 
 		if ( 'youtube' === $platform && 'track' === $chart_type ) {
+			$validation = self::validate_required_columns( $headers, array( array( 'title', 'track_title', 'song', 'song_title', 'name' ), array( 'artist', 'artist_name', 'artist_names', 'performer' ), array( 'rank', 'position', 'current_rank' ) ), 'YouTube Top Songs' );
+			if ( ! empty( $validation ) ) {
+				return $validation;
+			}
 			return array(
 				'success'     => true,
 				'parser_name' => 'youtube-top-songs-csv',
@@ -776,6 +885,10 @@ class AMC_Ingestion {
 		}
 
 		if ( 'spotify' === $platform && 'track' === $chart_type ) {
+			$validation = self::validate_required_columns( $headers, array( array( 'title', 'track_title', 'track_name', 'song', 'song_title', 'name' ), array( 'artist', 'artist_name', 'artist_names' ) ), 'Spotify Weekly' );
+			if ( ! empty( $validation ) ) {
+				return $validation;
+			}
 			return array(
 				'success'     => true,
 				'parser_name' => 'spotify-weekly-csv',
@@ -784,6 +897,10 @@ class AMC_Ingestion {
 		}
 
 		if ( 'shazam' === $platform && 'track' === $chart_type ) {
+			$validation = self::validate_required_columns( $headers, array( array( 'title', 'track_title', 'song', 'song_title', 'name' ), array( 'artist', 'artist_name', 'subtitle', 'artist_names' ), array( 'rank', 'position', 'current_rank' ) ), 'Shazam Chart' );
+			if ( ! empty( $validation ) ) {
+				return $validation;
+			}
 			return array(
 				'success'     => true,
 				'parser_name' => 'shazam-chart-csv',
@@ -997,6 +1114,18 @@ class AMC_Ingestion {
 			$normalized_title = '';
 		}
 
+		$validation = self::validate_normalized_payload(
+			array(
+				'chart_type'      => $chart_type,
+				'rank'            => ! empty( $payload['rank'] ) ? absint( $payload['rank'] ) : 0,
+				'track_title'     => $track_title,
+				'artist_name'     => $artist_name,
+				'artist_names'    => $artist_names,
+				'normalized_title'=> $normalized_title,
+				'normalized_artist' => $normalized_artist,
+			)
+		);
+
 		return array(
 			'raw'                 => ! empty( $payload['raw'] ) ? $payload['raw'] : array(),
 			'chart_date'          => $context['chart_date'],
@@ -1016,6 +1145,8 @@ class AMC_Ingestion {
 			'growth'              => ! empty( $payload['growth'] ) ? (string) $payload['growth'] : '',
 			'source_url'          => ! empty( $payload['source_url'] ) ? esc_url_raw( $payload['source_url'] ) : '',
 			'source_uri'          => ! empty( $payload['source_uri'] ) ? sanitize_text_field( $payload['source_uri'] ) : '',
+			'validation_status'   => $validation['status'],
+			'validation_message'  => $validation['message'],
 			'normalized_title'    => $normalized_title,
 			'normalized_artist'   => $normalized_artist,
 			'normalized_album'    => $normalized_album,
@@ -1081,7 +1212,15 @@ class AMC_Ingestion {
 	 * @return array
 	 */
 	private static function rank_aggregate_rows( $aggregate ) {
-		$items = array_values( $aggregate );
+		$minimum_source_count = max( 1, (int) self::methodology_value( 'minimum_source_count', 1 ) );
+		$items = array_values(
+			array_filter(
+				$aggregate,
+				function ( $item ) use ( $minimum_source_count ) {
+					return (int) $item['source_count'] >= $minimum_source_count;
+				}
+			)
+		);
 
 		usort(
 			$items,
@@ -1167,7 +1306,13 @@ class AMC_Ingestion {
 		foreach ( $previous_entries as $entry ) {
 			$key = $entry['entity_type'] . ':' . $entry['entity_id'];
 			if ( ! in_array( $key, $seen_keys, true ) ) {
-				$dropped_out[] = $key;
+				$entity = AMC_Data::get_entity( $entry['entity_type'], (int) $entry['entity_id'] );
+				$dropped_out[] = array(
+					'entity_type'   => $entry['entity_type'],
+					'entity_id'     => (int) $entry['entity_id'],
+					'name'          => $entity ? $entity['name'] : $key,
+					'previous_rank' => (int) $entry['current_rank'],
+				);
 			}
 		}
 
@@ -1270,10 +1415,16 @@ class AMC_Ingestion {
 		$matched      = 0;
 		$pending      = 0;
 		$rejected     = 0;
+		$review       = 0;
+		$invalid      = 0;
 
 		foreach ( $rows as $row ) {
 			if ( 'matched' === $row['matching_status'] ) {
 				++$matched;
+			} elseif ( 'review_needed' === $row['matching_status'] ) {
+				++$review;
+			} elseif ( 'invalid' === $row['matching_status'] ) {
+				++$invalid;
 			} elseif ( 'rejected' === $row['matching_status'] ) {
 				++$rejected;
 			} else {
@@ -1283,15 +1434,75 @@ class AMC_Ingestion {
 
 		$status = 'parsed';
 
-		if ( $matched > 0 && 0 === $pending ) {
+		if ( $matched > 0 && 0 === $pending && 0 === $review ) {
 			$status = 'matched';
-		} elseif ( $matched > 0 ) {
+		} elseif ( $matched > 0 || $review > 0 ) {
 			$status = 'matched';
-		} elseif ( $rejected > 0 && 0 === $pending ) {
+		} elseif ( $rejected > 0 || $invalid > 0 ) {
 			$status = 'parsed';
 		}
 
 		AMC_DB::save_row( 'source_uploads', array( 'file_status' => $status ), $upload_id );
+	}
+
+	/**
+	 * Read delimited rows.
+	 *
+	 * @param string $path File path.
+	 * @param string $delimiter Delimiter.
+	 * @return array
+	 */
+	private static function read_tabular_rows( $path, $extension ) {
+		if ( in_array( $extension, array( 'csv', 'txt', 'tsv' ), true ) ) {
+			$delimiter = 'tsv' === $extension ? "\t" : ',';
+			return array(
+				'success'     => true,
+				'parser_name' => 'delimited-' . $extension,
+				'rows'        => self::read_delimited_rows( $path, $delimiter ),
+			);
+		}
+
+		if ( 'xlsx' === $extension ) {
+			$xlsx = \Shuchkin\SimpleXLSX::parse( $path );
+
+			if ( ! $xlsx ) {
+				return array(
+					'success'     => false,
+					'parser_name' => 'xlsx-parser',
+					'message'     => 'XLSX parsing failed: ' . \Shuchkin\SimpleXLSX::parseError(),
+				);
+			}
+
+			return array(
+				'success'     => true,
+				'parser_name' => 'xlsx-parser',
+				'rows'        => $xlsx->rows(),
+			);
+		}
+
+		if ( 'xls' === $extension ) {
+			$xls = \Shuchkin\SimpleXLS::parse( $path );
+
+			if ( ! $xls ) {
+				return array(
+					'success'     => false,
+					'parser_name' => 'xls-parser',
+					'message'     => 'XLS parsing failed: ' . \Shuchkin\SimpleXLS::parseError(),
+				);
+			}
+
+			return array(
+				'success'     => true,
+				'parser_name' => 'xls-parser',
+				'rows'        => $xls->rows(),
+			);
+		}
+
+		return array(
+			'success'     => false,
+			'parser_name' => 'unsupported-file',
+			'message'     => 'Unsupported tabular format.',
+		);
 	}
 
 	/**
@@ -1394,25 +1605,60 @@ class AMC_Ingestion {
 	 * @return array|null
 	 */
 	private static function find_track_candidate( $row ) {
-		$tracks = AMC_DB::get_rows( 'tracks', array( 'order_by' => 'id ASC' ) );
+		$tracks      = AMC_DB::get_rows( 'tracks', array( 'order_by' => 'id ASC' ) );
+		$best        = null;
+		$best_score  = 0;
+		$best_basis  = 'No exact candidate';
+		$best_level  = 'review needed';
 
 		foreach ( $tracks as $track ) {
-			$title_match = self::normalize_text( $track['title'] ) === $row['normalized_title'];
-			$artist      = ! empty( $track['artist_id'] ) ? AMC_DB::get_row( 'artists', (int) $track['artist_id'] ) : null;
-			$artist_name = $artist ? self::normalize_text( $artist['name'] ) : '';
-			$artist_match = empty( $row['normalized_artist'] ) || $artist_name === $row['normalized_artist'];
-
-			if ( ! $title_match ) {
-				continue;
-			}
+			$artist          = ! empty( $track['artist_id'] ) ? AMC_DB::get_row( 'artists', (int) $track['artist_id'] ) : null;
+			$track_aliases   = self::track_aliases( $track );
+			$artist_aliases  = $artist ? self::artist_aliases( $artist ) : array();
+			$title_result    = self::best_alias_match_score( $row['normalized_title'], $track_aliases );
+			$artist_result   = self::best_alias_match_score( $row['normalized_artist'], $artist_aliases );
+			$combined_score  = ( $title_result['score'] * 0.7 ) + ( $artist_result['score'] * 0.3 );
+			$basis           = 'Alias similarity review';
 
 			if ( ! empty( $row['normalized_isrc'] ) && ! empty( $track['isrc'] ) && strtoupper( $track['isrc'] ) === strtoupper( $row['normalized_isrc'] ) ) {
-				return $track;
+				return array(
+					'candidate'  => $track,
+					'confidence' => 100,
+					'level'      => 'exact',
+					'basis'      => 'Exact ISRC match',
+				);
 			}
 
-			if ( $artist_match ) {
-				return $track;
+			if ( 100 === $title_result['score'] && ( empty( $row['normalized_artist'] ) || 100 === $artist_result['score'] ) ) {
+				return array(
+					'candidate'  => $track,
+					'confidence' => 99,
+					'level'      => 'exact',
+					'basis'      => 'Exact normalized title + artist match',
+				);
 			}
+
+			if ( $title_result['alias'] && $artist_result['score'] >= 90 ) {
+				$basis = 'Alias-based title match with strong artist confirmation';
+			} elseif ( $title_result['score'] >= 92 && $artist_result['score'] >= 84 ) {
+				$basis = 'High-confidence normalized similarity';
+			}
+
+			if ( $combined_score > $best_score ) {
+				$best_score = $combined_score;
+				$best       = $track;
+				$best_basis = $basis;
+				$best_level = $combined_score >= 92 ? 'high confidence' : ( $combined_score >= 76 ? 'review needed' : 'no match' );
+			}
+		}
+
+		if ( $best && $best_score >= 76 ) {
+			return array(
+				'candidate'  => $best,
+				'confidence' => round( $best_score, 2 ),
+				'level'      => $best_level,
+				'basis'      => $best_basis,
+			);
 		}
 
 		return null;
@@ -1425,12 +1671,40 @@ class AMC_Ingestion {
 	 * @return array|null
 	 */
 	private static function find_artist_candidate( $row ) {
-		$artists = AMC_DB::get_rows( 'artists', array( 'order_by' => 'id ASC' ) );
+		$artists     = AMC_DB::get_rows( 'artists', array( 'order_by' => 'id ASC' ) );
+		$best        = null;
+		$best_score  = 0;
+		$best_basis  = 'No exact candidate';
+		$best_level  = 'review needed';
 
 		foreach ( $artists as $artist ) {
-			if ( self::normalize_text( $artist['name'] ) === $row['normalized_artist'] ) {
-				return $artist;
+			$aliases = self::artist_aliases( $artist );
+			$result  = self::best_alias_match_score( $row['normalized_artist'], $aliases );
+
+			if ( 100 === $result['score'] ) {
+				return array(
+					'candidate'  => $artist,
+					'confidence' => 99,
+					'level'      => 'exact',
+					'basis'      => $result['alias'] ? 'Artist alias exact match' : 'Artist exact normalized match',
+				);
 			}
+
+			if ( $result['score'] > $best_score ) {
+				$best_score = $result['score'];
+				$best       = $artist;
+				$best_basis = $result['alias'] ? 'Artist alias similarity' : 'Artist normalized similarity';
+				$best_level = $best_score >= 92 ? 'high confidence' : ( $best_score >= 78 ? 'review needed' : 'no match' );
+			}
+		}
+
+		if ( $best && $best_score >= 78 ) {
+			return array(
+				'candidate'  => $best,
+				'confidence' => round( $best_score, 2 ),
+				'level'      => $best_level,
+				'basis'      => $best_basis,
+			);
 		}
 
 		return null;
@@ -1448,6 +1722,12 @@ class AMC_Ingestion {
 
 		if ( $metric > 0 && $platform_max > 0 ) {
 			return min( 1, $metric / $platform_max );
+		}
+
+		$fallback_behavior = strtolower( (string) self::methodology_value( 'fallback_metric_behavior', 'Use rank fallback when source metric is missing' ) );
+
+		if ( false === strpos( $fallback_behavior, 'rank fallback' ) ) {
+			return 0;
 		}
 
 		$rank = absint( $row['rank'] );
@@ -1512,6 +1792,22 @@ class AMC_Ingestion {
 	}
 
 	/**
+	 * Read a single methodology value.
+	 *
+	 * @param string $key Rule key.
+	 * @param mixed  $default Default value.
+	 * @return mixed
+	 */
+	private static function methodology_value( $key, $default = '' ) {
+		global $wpdb;
+
+		$table = AMC_DB::table( 'scoring_rules' );
+		$value = $wpdb->get_var( $wpdb->prepare( "SELECT rule_value FROM {$table} WHERE rule_key = %s LIMIT 1", $key ) ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+
+		return null !== $value ? $value : $default;
+	}
+
+	/**
 	 * Calculate growth bonus.
 	 *
 	 * @param string $growth Growth value.
@@ -1524,7 +1820,8 @@ class AMC_Ingestion {
 			return 0;
 		}
 
-		return max( -0.05, min( 0.05, (float) $clean / 1000 ) );
+		$multiplier = (float) self::methodology_value( 'growth_bonus_multiplier', 1 );
+		return max( -0.05, min( 0.05, ( (float) $clean / 1000 ) * $multiplier ) );
 	}
 
 	/**
@@ -1598,6 +1895,85 @@ class AMC_Ingestion {
 	}
 
 	/**
+	 * Validate required columns for a parser.
+	 *
+	 * @param array  $headers Headers.
+	 * @param array  $groups Required groups.
+	 * @param string $label Parser label.
+	 * @return array
+	 */
+	private static function validate_required_columns( $headers, $groups, $label ) {
+		$available = array_filter( $headers );
+		$missing   = array();
+
+		foreach ( $groups as $group ) {
+			$found = false;
+			foreach ( $group as $candidate ) {
+				if ( in_array( $candidate, $available, true ) ) {
+					$found = true;
+					break;
+				}
+			}
+			if ( ! $found ) {
+				$missing[] = implode( ' / ', $group );
+			}
+		}
+
+		if ( empty( $missing ) ) {
+			return array();
+		}
+
+		return array(
+			'success'     => false,
+			'parser_name' => 'missing-required-columns',
+			'message'     => sprintf( '%1$s file is missing required columns: %2$s.', $label, implode( ', ', $missing ) ),
+		);
+	}
+
+	/**
+	 * Validate a normalized payload.
+	 *
+	 * @param array $payload Payload.
+	 * @return array
+	 */
+	private static function validate_normalized_payload( $payload ) {
+		if ( empty( $payload['rank'] ) ) {
+			return array(
+				'status'  => 'invalid',
+				'message' => 'Row rejected because rank is missing or invalid.',
+			);
+		}
+
+		if ( 'artist' === $payload['chart_type'] ) {
+			if ( empty( $payload['artist_name'] ) || empty( $payload['normalized_artist'] ) ) {
+				return array(
+					'status'  => 'invalid',
+					'message' => 'Row rejected because artist name is empty after normalization.',
+				);
+			}
+		} else {
+			if ( empty( $payload['track_title'] ) || empty( $payload['normalized_title'] ) ) {
+				return array(
+					'status'  => 'invalid',
+					'message' => 'Row rejected because track title is empty after normalization.',
+				);
+			}
+
+			if ( empty( $payload['artist_names'] ) || empty( $payload['normalized_artist'] ) ) {
+				return array(
+					'status'  => 'invalid',
+					'message' => 'Row rejected because artist metadata is empty after normalization.',
+				);
+			}
+		}
+
+		return array(
+			'status'  => 'valid',
+			'message' => '',
+		);
+	}
+
+	/**
 	 * Resolve artwork for an entry.
 	 *
 	 * @param string $entity_type Entity type.
@@ -1662,7 +2038,22 @@ class AMC_Ingestion {
 	 * @return string
 	 */
 	private static function normalize_text( $value ) {
-		$value = strtolower( trim( (string) $value ) );
+		$value = trim( (string) $value );
+
+		if ( function_exists( 'mb_strtolower' ) ) {
+			$value = mb_strtolower( $value, 'UTF-8' );
+		} else {
+			$value = strtolower( $value );
+		}
+
+		$value = str_replace( array( 'ـ', '“', '”', '’', '‘', '`', '´', '–', '—', '_', '|', '•' ), ' ', $value );
+		$value = preg_replace( '/[\x{064B}-\x{065F}\x{0670}]/u', '', $value );
+		$value = str_replace( array( 'أ', 'إ', 'آ', 'ٱ' ), 'ا', $value );
+		$value = str_replace( array( 'ى', 'ئ' ), 'ي', $value );
+		$value = str_replace( 'ة', 'ه', $value );
+		$value = str_replace( 'ؤ', 'و', $value );
+		$value = self::strip_noise_suffixes( $value );
+		$value = preg_replace( '/\b(feat|ft|featuring)\b\.?/u', ' ', $value );
 		$value = preg_replace( '/[^\p{L}\p{N}]+/u', ' ', $value );
 		$value = preg_replace( '/\s+/', ' ', $value );
 		return trim( $value );
@@ -1683,6 +2074,107 @@ class AMC_Ingestion {
 		}
 
 		return '';
+	}
+
+	/**
+	 * Remove common non-title suffixes.
+	 *
+	 * @param string $value Raw value.
+	 * @return string
+	 */
+	private static function strip_noise_suffixes( $value ) {
+		$patterns = array(
+			'/\b(official audio|official video|audio|video|lyrics?|lyric video|visualizer|live|performance|clip officiel)\b/u',
+			'/\(([^)]*(official audio|official video|lyrics?|visualizer|live)[^)]*)\)/u',
+			'/\[([^\]]*(official audio|official video|lyrics?|visualizer|live)[^\]]*)\]/u',
+		);
+
+		return trim( preg_replace( $patterns, ' ', $value ) );
+	}
+
+	/**
+	 * Build artist aliases.
+	 *
+	 * @param array $artist Artist row.
+	 * @return array
+	 */
+	private static function artist_aliases( $artist ) {
+		$aliases = array( self::normalize_text( $artist['name'] ) );
+		if ( ! empty( $artist['aliases'] ) ) {
+			$aliases = array_merge( $aliases, preg_split( '/[,|\n]+/', (string) $artist['aliases'] ) );
+		}
+
+		return self::normalize_alias_list( $aliases );
+	}
+
+	/**
+	 * Build track aliases.
+	 *
+	 * @param array $track Track row.
+	 * @return array
+	 */
+	private static function track_aliases( $track ) {
+		$aliases = array( self::normalize_text( $track['title'] ) );
+		if ( ! empty( $track['aliases'] ) ) {
+			$aliases = array_merge( $aliases, preg_split( '/[,|\n]+/', (string) $track['aliases'] ) );
+		}
+
+		return self::normalize_alias_list( $aliases );
+	}
+
+	/**
+	 * Normalize alias list.
+	 *
+	 * @param array $aliases Aliases.
+	 * @return array
+	 */
+	private static function normalize_alias_list( $aliases ) {
+		$out = array();
+		foreach ( $aliases as $alias ) {
+			$normalized = self::normalize_text( $alias );
+			if ( $normalized ) {
+				$out[] = $normalized;
+			}
+		}
+		return array_values( array_unique( $out ) );
+	}
+
+	/**
+	 * Find best match score against aliases.
+	 *
+	 * @param string $needle Normalized input.
+	 * @param array  $aliases Aliases.
+	 * @return array
+	 */
+	private static function best_alias_match_score( $needle, $aliases ) {
+		$needle = self::normalize_text( $needle );
+		$best   = array(
+			'score' => 0,
+			'alias' => false,
+		);
+
+		if ( ! $needle ) {
+			return $best;
+		}
+
+		foreach ( $aliases as $index => $alias ) {
+			if ( $needle === $alias ) {
+				return array(
+					'score' => 100,
+					'alias' => $index > 0,
+				);
+			}
+
+			similar_text( $needle, $alias, $percent );
+			if ( $percent > $best['score'] ) {
+				$best = array(
+					'score' => (float) $percent,
+					'alias' => $index > 0,
+				);
+			}
+		}
+
+		return $best;
 	}
 
 	/**

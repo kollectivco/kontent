@@ -3,7 +3,7 @@ Contributors: kollectivco
 Tags: music, charts, artists, tracks, albums
 Requires at least: 6.0
 Tested up to: 6.5
-Stable tag: 3.2.0
+Stable tag: 3.3.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -30,6 +30,9 @@ Features:
 3. Visit Settings > Permalinks once or reactivate the plugin to refresh routes.
 
 == Changelog ==
+
+= 3.3.0 =
+* Added real XLSX/XLS support, stronger parser validation, smarter matching confidence levels, row-level validation feedback, improved dropped-out visibility, and more flexible scoring methodology controls.
 
 = 3.2.0 =
 * Added the real Phase 3.2 source-to-chart pipeline with upload metadata, source-specific parsing, weighted generation, trend analysis, draft generation, and publishing status flow.

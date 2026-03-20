@@ -11,7 +11,7 @@ class AMC_DB {
 	/**
 	 * Database version.
 	 */
-	const VERSION = '1.2.0';
+	const VERSION = '1.3.0';
 
 	/**
 	 * Table suffixes.
@@ -103,6 +103,7 @@ class AMC_DB {
 				name varchar(191) NOT NULL,
 				slug varchar(191) NOT NULL,
 				image varchar(255) NULL,
+				aliases text NULL,
 				bio longtext NULL,
 				blurb text NULL,
 				country varchar(191) NULL,
@@ -179,6 +180,8 @@ class AMC_DB {
 				status varchar(20) NOT NULL DEFAULT 'draft',
 				is_featured tinyint(1) NOT NULL DEFAULT 0,
 				notes text NULL,
+				comparison_summary longtext NULL,
+				dropped_out_json longtext NULL,
 				published_at datetime NULL,
 				archived_at datetime NULL,
 				created_at datetime NOT NULL,
@@ -286,6 +289,8 @@ class AMC_DB {
 				growth varchar(64) NULL,
 				source_url text NULL,
 				source_uri text NULL,
+				validation_status varchar(20) NOT NULL DEFAULT 'valid',
+				validation_message text NULL,
 				normalized_title varchar(191) NULL,
 				normalized_artist varchar(191) NULL,
 				normalized_album varchar(191) NULL,
@@ -295,6 +300,8 @@ class AMC_DB {
 				matched_entity_type varchar(20) NULL,
 				matched_entity_id bigint(20) unsigned NOT NULL DEFAULT 0,
 				matching_status varchar(20) NOT NULL DEFAULT 'pending',
+				match_confidence decimal(5,2) NOT NULL DEFAULT 0.00,
+				match_confidence_label varchar(32) NULL,
 				created_at datetime NOT NULL,
 				updated_at datetime NOT NULL,
 				PRIMARY KEY  (id),

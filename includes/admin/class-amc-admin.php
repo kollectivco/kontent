@@ -839,6 +839,20 @@ class AMC_Admin {
 				$entries
 			)
 		);
+		if ( ! empty( $week['dropped_out_json'] ) ) {
+			$dropped_out = json_decode( $week['dropped_out_json'], true );
+			if ( is_array( $dropped_out ) && ! empty( $dropped_out ) ) {
+				echo '<div class="amc-admin-definition-list">';
+				foreach ( $dropped_out as $item ) {
+					printf(
+						'<div><strong>%1$s</strong><span>Dropped out from previous week at rank %2$s</span></div>',
+						esc_html( ! empty( $item['name'] ) ? $item['name'] : 'Unknown item' ),
+						esc_html( (string) ( ! empty( $item['previous_rank'] ) ? $item['previous_rank'] : '-' ) )
+					);
+				}
+				echo '</div>';
+			}
+		}
 		self::render_panel_end();
 		echo '</section>';
 	}
@@ -918,6 +932,7 @@ class AMC_Admin {
 			'name'              => '',
 			'slug'              => '',
 			'image'             => '',
+			'aliases'           => '',
 			'bio'               => '',
 			'country'           => '',
 			'genre'             => '',
@@ -941,6 +956,7 @@ class AMC_Admin {
 		self::field_input( 'Artist name', 'name', $artist['name'] );
 		self::field_input( 'Slug', 'slug', $artist['slug'] );
 		self::field_input( 'Image', 'image', $artist['image'] );
+		self::field_input( 'Aliases', 'aliases', ! empty( $artist['aliases'] ) ? $artist['aliases'] : '' );
 		self::field_textarea( 'Bio', 'bio', $artist['bio'] );
 		self::field_input( 'Country', 'country', $artist['country'] );
 		self::field_input( 'Genre', 'genre', $artist['genre'] );
@@ -1082,12 +1098,13 @@ class AMC_Admin {
 				echo '<div class="amc-admin-definition-list">';
 				foreach ( $preview_rows as $preview_row ) {
 					printf(
-						'<div><strong>%1$s</strong><span>%2$s | %3$s | rank %4$s | %5$s</span></div>',
+						'<div><strong>%1$s</strong><span>%2$s | %3$s | rank %4$s | %5$s%6$s</span></div>',
 						esc_html( ! empty( $preview_row['track_title'] ) ? $preview_row['track_title'] : ( ! empty( $preview_row['artist_name'] ) ? $preview_row['artist_name'] : 'Untitled row' ) ),
 						esc_html( ! empty( $preview_row['artist_names'] ) ? $preview_row['artist_names'] : $preview_row['artist_name'] ),
 						esc_html( $preview_row['album_name'] ),
 						esc_html( (string) $preview_row['rank'] ),
-						esc_html( ucfirst( $preview_row['matching_status'] ) )
+						esc_html( ucwords( str_replace( '_', ' ', $preview_row['matching_status'] ) ) ),
+						! empty( $preview_row['validation_message'] ) ? ' | ' . esc_html( $preview_row['validation_message'] ) : ''
 					);
 				}
 				echo '</div>';
@@ -1148,6 +1165,10 @@ class AMC_Admin {
 			'Minimum Source Coverage'   => 'minimum_source_coverage',
 			'Manual Editorial Override' => 'manual_editorial_override',
 			'Catalog Reentry Threshold' => 'catalog_reentry_threshold',
+			'Growth Bonus Multiplier'   => 'growth_bonus_multiplier',
+			'Fallback Metric Behavior'  => 'fallback_metric_behavior',
+			'Minimum Source Count'      => 'minimum_source_count',
+			'Eligibility Mode'          => 'eligibility_mode',
 		);
 		echo '<section class="amc-admin-grid amc-admin-grid--split">';
 		self::render_panel_start( 'Source weights', 'Scoring weights now persist to the scoring rules table and prepare the next generation layer.' );
@@ -1211,6 +1232,18 @@ class AMC_Admin {
 			echo '</div>';
 		} else {
 			echo '<p>No chart week is available for publishing yet.</p>';
+		}
+
+		if ( ! empty( $data['dropped_out'] ) ) {
+			echo '<div class="amc-admin-definition-list">';
+			foreach ( $data['dropped_out'] as $item ) {
+				printf(
+					'<div><strong>%1$s</strong><span>Dropped out from previous week at rank %2$s</span></div>',
+					esc_html( ! empty( $item['name'] ) ? $item['name'] : 'Unknown item' ),
+					esc_html( (string) ( ! empty( $item['previous_rank'] ) ? $item['previous_rank'] : '-' ) )
+				);
+			}
+			echo '</div>';
 		}
 		self::render_panel_end();
 		echo '</section>';
@@ -1703,6 +1736,7 @@ class AMC_Admin {
 						'name'              => sanitize_text_field( wp_unslash( $_POST['name'] ) ),
 						'slug'              => sanitize_title( wp_unslash( $_POST['slug'] ) ),
 						'image'             => esc_url_raw( wp_unslash( $_POST['image'] ) ),
+						'aliases'           => sanitize_text_field( wp_unslash( $_POST['aliases'] ) ),
 						'bio'               => sanitize_textarea_field( wp_unslash( $_POST['bio'] ) ),
 						'country'           => sanitize_text_field( wp_unslash( $_POST['country'] ) ),
 						'genre'             => sanitize_text_field( wp_unslash( $_POST['genre'] ) ),
@@ -2014,7 +2048,10 @@ class AMC_Admin {
 	public static function handle_save_scoring() {
 		self::assert_cap( 'amc_manage_weeks' );
 		check_admin_referer( 'amc_save_scoring' );
-		AMC_Ingestion::save_scoring_rules( $_POST );
+		$result = AMC_Ingestion::save_scoring_rules( $_POST );
+		if ( ! empty( $result['warnings'] ) ) {
+			self::redirect_notice( self::posted_redirect(), 'warning', 'Some scoring values were invalid and were kept at their previous values.' );
+		}
 		self::redirect_notice( self::posted_redirect(), 'success', 'Scoring rules saved successfully.' );
 	}
 
