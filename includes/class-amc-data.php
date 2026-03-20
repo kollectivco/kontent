@@ -390,6 +390,7 @@ class AMC_Data {
 			'url'         => self::route_url( 'charts/' . $slug ),
 			'entries'     => $entries,
 			'featured'    => $featured,
+			'summary'     => self::get_chart_summary( $entries ),
 		);
 	}
 
@@ -427,6 +428,7 @@ class AMC_Data {
 					'entity'        => $entity,
 					'movement_icon' => self::movement_icon( $entry['movement'] ),
 					'movement_label'=> ucfirst( $entry['movement'] ),
+					'movement_delta'=> self::movement_delta( $entry ),
 				)
 			);
 		}
@@ -578,6 +580,167 @@ class AMC_Data {
 	}
 
 	/**
+	 * Get tracks related to a track.
+	 *
+	 * @param int $track_id Track ID.
+	 * @param int $artist_id Artist ID.
+	 * @param int $limit Number of items.
+	 * @return array
+	 */
+	public static function get_related_tracks( $track_id, $artist_id = 0, $limit = 4 ) {
+		$posts = get_posts(
+			array(
+				'post_type'      => 'amc_track',
+				'post_status'    => 'publish',
+				'posts_per_page' => $limit + 2,
+				'post__not_in'   => array( $track_id ),
+				'meta_query'     => $artist_id ? array(
+					array(
+						'key'   => '_amc_artist_id',
+						'value' => $artist_id,
+					),
+				) : array(),
+			)
+		);
+
+		if ( empty( $posts ) ) {
+			$posts = get_posts(
+				array(
+					'post_type'      => 'amc_track',
+					'post_status'    => 'publish',
+					'posts_per_page' => $limit,
+					'post__not_in'   => array( $track_id ),
+				)
+			);
+		}
+
+		return array_slice(
+			array_values(
+				array_filter(
+					array_map(
+						function ( $post ) {
+							return self::get_entity( 'track', $post->ID );
+						},
+						$posts
+					)
+				)
+			),
+			0,
+			$limit
+		);
+	}
+
+	/**
+	 * Get artist peers from chart lists.
+	 *
+	 * @param int $artist_id Artist ID.
+	 * @param int $limit Number of items.
+	 * @return array
+	 */
+	public static function get_related_artists( $artist_id, $limit = 4 ) {
+		$slugs   = array( 'top-artists', 'hot-100-artists' );
+		$results = array();
+
+		foreach ( $slugs as $slug ) {
+			foreach ( self::get_chart_entries( $slug ) as $entry ) {
+				if ( empty( $entry['entity']['id'] ) || (int) $entry['entity']['id'] === (int) $artist_id ) {
+					continue;
+				}
+
+				$results[ $entry['entity']['id'] ] = $entry['entity'];
+
+				if ( count( $results ) >= $limit ) {
+					break 2;
+				}
+			}
+		}
+
+		return array_values( $results );
+	}
+
+	/**
+	 * Get chart appearances for an artist.
+	 *
+	 * @param int $artist_id Artist ID.
+	 * @return array
+	 */
+	public static function get_artist_chart_positions( $artist_id ) {
+		return self::get_entity_chart_positions( 'artist', $artist_id );
+	}
+
+	/**
+	 * Get chart appearances for a track.
+	 *
+	 * @param int $track_id Track ID.
+	 * @return array
+	 */
+	public static function get_track_chart_positions( $track_id ) {
+		return self::get_entity_chart_positions( 'track', $track_id );
+	}
+
+	/**
+	 * Get related charts for an entity.
+	 *
+	 * @param string $entity_type Entity type.
+	 * @param int    $entity_id Entity ID.
+	 * @return array
+	 */
+	public static function get_entity_chart_positions( $entity_type, $entity_id ) {
+		$positions = array();
+
+		foreach ( self::get_all_charts() as $chart ) {
+			foreach ( $chart['entries'] as $entry ) {
+				if ( $entry['entity_type'] === $entity_type && (int) $entry['entity_id'] === (int) $entity_id ) {
+					$positions[] = array(
+						'chart' => $chart,
+						'entry' => $entry,
+					);
+					break;
+				}
+			}
+		}
+
+		return $positions;
+	}
+
+	/**
+	 * Get chart summary metrics.
+	 *
+	 * @param array $entries Chart entries.
+	 * @return array
+	 */
+	public static function get_chart_summary( $entries ) {
+		if ( empty( $entries ) ) {
+			return array();
+		}
+
+		$total_weeks  = 0;
+		$highest_jump = null;
+		$steady_count = 0;
+
+		foreach ( $entries as $entry ) {
+			$total_weeks += (int) $entry['weeks_on_chart'];
+
+			if ( 'same' === $entry['movement'] ) {
+				++$steady_count;
+			}
+
+			if ( 'up' === $entry['movement'] ) {
+				if ( null === $highest_jump || (int) $entry['movement_delta'] > (int) $highest_jump['movement_delta'] ) {
+					$highest_jump = $entry;
+				}
+			}
+		}
+
+		return array(
+			'entries'       => count( $entries ),
+			'average_weeks' => count( $entries ) ? round( $total_weeks / count( $entries ) ) : 0,
+			'steady_count'  => $steady_count,
+			'top_mover'     => $highest_jump,
+		);
+	}
+
+	/**
 	 * Determine movement icon.
 	 *
 	 * @param string $movement Movement type.
@@ -594,6 +757,23 @@ class AMC_Data {
 			default:
 				return '→';
 		}
+	}
+
+	/**
+	 * Determine movement delta.
+	 *
+	 * @param array $entry Entry data.
+	 * @return int
+	 */
+	public static function movement_delta( $entry ) {
+		$current = isset( $entry['current_rank'] ) ? (int) $entry['current_rank'] : 0;
+		$last    = isset( $entry['last_rank'] ) ? (int) $entry['last_rank'] : 0;
+
+		if ( $current <= 0 || $last <= 0 ) {
+			return 0;
+		}
+
+		return abs( $last - $current );
 	}
 
 	/**

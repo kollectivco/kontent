@@ -55,3 +55,26 @@ if ( ! function_exists( 'amc_route_label' ) ) {
 		}
 	}
 }
+
+if ( ! function_exists( 'amc_movement_note' ) ) {
+	/**
+	 * Descriptive movement note.
+	 *
+	 * @param array $entry Chart entry.
+	 * @return string
+	 */
+	function amc_movement_note( $entry ) {
+		$delta = isset( $entry['movement_delta'] ) ? (int) $entry['movement_delta'] : 0;
+
+		switch ( $entry['movement'] ) {
+			case 'up':
+				return $delta > 1 ? 'Up ' . $delta . ' spots' : 'Up 1 spot';
+			case 'down':
+				return $delta > 1 ? 'Down ' . $delta . ' spots' : 'Down 1 spot';
+			case 'new':
+				return 'New this week';
+			default:
+				return 'No change';
+		}
+	}
+}

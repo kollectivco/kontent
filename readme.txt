@@ -3,7 +3,7 @@ Contributors: kollectivco
 Tags: music, charts, artists, tracks, albums
 Requires at least: 6.0
 Tested up to: 6.5
-Stable tag: 1.0.0
+Stable tag: 1.1.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -29,6 +29,9 @@ Features:
 3. Visit Settings > Permalinks once or reactivate the plugin to refresh routes.
 
 == Changelog ==
+
+= 1.1.0 =
+* Editorial frontend polish pass with richer chart summaries, deeper single pages, refined row styling, hover states, and improved mobile behavior.
 
 = 1.0.0 =
 * Initial Phase 1 public charts plugin.

@@ -3,7 +3,7 @@
  * Plugin Name: Arabic Music Charts Platform
  * Plugin URI: https://github.com/kollectivco/kontent
  * Description: Phase 1 public-facing music charts experience with editorial chart pages, seeded demo data, and plugin-based routing.
- * Version: 1.0.0
+ * Version: 1.1.0
  * Author: Codex
  * License: GPL2+
  * Text Domain: arabic-music-charts
@@ -14,7 +14,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'AMC_PLUGIN_VERSION', '1.0.0' );
+define( 'AMC_PLUGIN_VERSION', '1.1.0' );
 define( 'AMC_PLUGIN_FILE', __FILE__ );
 define( 'AMC_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'AMC_PLUGIN_URL', plugin_dir_url( __FILE__ ) );

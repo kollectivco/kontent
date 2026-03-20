@@ -10,6 +10,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 $featured = ! empty( $chart['featured'] ) ? $chart['featured'] : null;
+$summary  = ! empty( $chart['summary'] ) ? $chart['summary'] : array();
 ?>
 <article class="amc-chart-card amc-chart-card--<?php echo esc_attr( $chart['accent'] ); ?>">
 	<div class="amc-chart-card__top">
@@ -17,6 +18,14 @@ $featured = ! empty( $chart['featured'] ) ? $chart['featured'] : null;
 		<h3><a href="<?php echo esc_url( $chart['url'] ); ?>"><?php echo esc_html( $chart['title'] ); ?></a></h3>
 		<p><?php echo esc_html( $chart['description'] ); ?></p>
 	</div>
+
+	<?php if ( ! empty( $summary ) ) : ?>
+		<div class="amc-chart-card__meta">
+			<span><?php echo esc_html( $summary['entries'] ); ?> entries</span>
+			<span><?php echo esc_html( $summary['average_weeks'] ); ?> avg weeks</span>
+			<span><?php echo esc_html( $summary['steady_count'] ); ?> holding</span>
+		</div>
+	<?php endif; ?>
 
 	<?php if ( $featured ) : ?>
 		<div class="amc-chart-card__featured">
@@ -30,6 +39,9 @@ $featured = ! empty( $chart['featured'] ) ? $chart['featured'] : null;
 					<?php elseif ( ! empty( $featured['entity']['country'] ) ) : ?>
 						<span><?php echo esc_html( $featured['entity']['country'] ); ?></span>
 					<?php endif; ?>
+					<em class="amc-inline-move amc-move--<?php echo esc_attr( $featured['movement'] ); ?>">
+						<?php echo esc_html( amc_movement_note( $featured ) ); ?>
+					</em>
 				</div>
 			</div>
 		</div>

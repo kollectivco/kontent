@@ -28,8 +28,13 @@ if ( ! defined( 'ABSPATH' ) ) {
 		<div class="amc-chart-table__body" role="rowgroup">
 			<?php foreach ( $entries as $entry ) : ?>
 				<?php $entity = $entry['entity']; ?>
-				<div class="amc-chart-table__row" role="row">
-					<span class="amc-chart-table__rank" role="cell"><?php echo esc_html( $entry['current_rank'] ); ?></span>
+				<div class="amc-chart-table__row amc-chart-table__row--<?php echo esc_attr( $entry['movement'] ); ?>" role="row">
+					<div class="amc-chart-table__rank-wrap" role="cell">
+						<span class="amc-chart-table__rank"><?php echo esc_html( $entry['current_rank'] ); ?></span>
+						<?php if ( 1 === (int) $entry['current_rank'] ) : ?>
+							<small>#1</small>
+						<?php endif; ?>
+					</div>
 					<div class="amc-chart-table__main" role="cell">
 						<?php echo amc_cover_markup( $entity, 'sm' ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
 						<div>
@@ -47,13 +52,17 @@ if ( ! defined( 'ABSPATH' ) ) {
 							<?php elseif ( ! empty( $entity['artist']['country'] ) ) : ?>
 								<span><?php echo esc_html( $entity['artist']['country'] ); ?></span>
 							<?php endif; ?>
+							<em class="amc-inline-move amc-inline-move--detail amc-move--<?php echo esc_attr( $entry['movement'] ); ?>">
+								<?php echo esc_html( amc_movement_note( $entry ) ); ?>
+							</em>
 						</div>
 					</div>
 					<span role="cell" data-label="Last"><?php echo esc_html( $entry['last_rank'] ); ?></span>
 					<span role="cell" data-label="Peak"><?php echo esc_html( $entry['peak_rank'] ); ?></span>
 					<span role="cell" data-label="Weeks"><?php echo esc_html( $entry['weeks_on_chart'] ); ?></span>
 					<span class="amc-move amc-move--<?php echo esc_attr( $entry['movement'] ); ?>" role="cell" data-label="Move">
-						<?php echo esc_html( $entry['movement_icon'] ); ?> <?php echo esc_html( $entry['movement_label'] ); ?>
+						<span class="amc-move__arrow"><?php echo esc_html( $entry['movement_icon'] ); ?></span>
+						<span class="amc-move__text"><?php echo esc_html( amc_movement_note( $entry ) ); ?></span>
 					</span>
 				</div>
 			<?php endforeach; ?>
