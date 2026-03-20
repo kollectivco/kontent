@@ -3,7 +3,7 @@ Contributors: kollectivco
 Tags: music, charts, artists, tracks, albums
 Requires at least: 6.0
 Tested up to: 6.5
-Stable tag: 2.1.0
+Stable tag: 2.1.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -30,6 +30,9 @@ Features:
 3. Visit Settings > Permalinks once or reactivate the plugin to refresh routes.
 
 == Changelog ==
+
+= 2.1.1 =
+* Corrected GitHub update versioning for the hybrid dashboard release.
 
 = 2.1.0 =
 * Added hybrid admin architecture with lightweight wp-admin controls and a full custom dashboard at `/charts-dashboard`.
