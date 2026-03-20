@@ -173,6 +173,40 @@ class AMC_Plugin {
 			return;
 		}
 
+		if ( 'dashboard' === get_query_var( 'amc_route' ) ) {
+			wp_enqueue_style(
+				'amc-admin',
+				AMC_PLUGIN_URL . 'assets/css/admin.css',
+				array(),
+				AMC_PLUGIN_VERSION
+			);
+
+			wp_enqueue_style(
+				'amc-dashboard',
+				AMC_PLUGIN_URL . 'assets/css/dashboard.css',
+				array( 'amc-admin' ),
+				AMC_PLUGIN_VERSION
+			);
+
+			wp_enqueue_script(
+				'amc-admin',
+				AMC_PLUGIN_URL . 'assets/js/admin.js',
+				array(),
+				AMC_PLUGIN_VERSION,
+				true
+			);
+
+			wp_enqueue_script(
+				'amc-dashboard',
+				AMC_PLUGIN_URL . 'assets/js/dashboard.js',
+				array( 'amc-admin' ),
+				AMC_PLUGIN_VERSION,
+				true
+			);
+
+			return;
+		}
+
 		wp_enqueue_style(
 			'amc-frontend',
 			AMC_PLUGIN_URL . 'assets/css/frontend.css',

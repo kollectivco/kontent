@@ -1,0 +1,113 @@
+body.amc-dashboard-page {
+	background:
+		radial-gradient(circle at top left, rgba(232, 194, 111, 0.1), transparent 20%),
+		linear-gradient(180deg, #0a0d13 0%, #07090d 100%);
+}
+
+.amc-dashboard-page .amc-site-shell {
+	padding: 22px;
+}
+
+.amc-custom-dashboard {
+	display: grid;
+	grid-template-columns: 270px minmax(0, 1fr);
+	gap: 22px;
+	min-height: calc(100vh - 44px);
+}
+
+.amc-custom-dashboard__sidebar,
+.amc-custom-dashboard__main {
+	border: 1px solid rgba(255, 255, 255, 0.08);
+	border-radius: 28px;
+	background: linear-gradient(180deg, rgba(18, 20, 28, 0.96), rgba(10, 12, 17, 0.98));
+	box-shadow: 0 30px 80px rgba(0, 0, 0, 0.38);
+}
+
+.amc-custom-dashboard__sidebar {
+	padding: 24px 18px;
+	display: flex;
+	flex-direction: column;
+	gap: 18px;
+}
+
+.amc-custom-dashboard__brand {
+	display: flex;
+	align-items: center;
+	gap: 14px;
+	padding: 6px 4px 18px;
+	border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.amc-custom-dashboard__brand span {
+	display: grid;
+	place-items: center;
+	width: 48px;
+	height: 48px;
+	border-radius: 16px;
+	background: linear-gradient(135deg, #f2ce7b, #b16d2b);
+	color: #111;
+	font-weight: 800;
+	letter-spacing: 0.08em;
+}
+
+.amc-custom-dashboard__brand strong {
+	display: block;
+	color: #f4efe6;
+	font-size: 15px;
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+}
+
+.amc-custom-dashboard__brand small {
+	color: #a39c90;
+	font-size: 12px;
+}
+
+.amc-custom-dashboard__nav {
+	display: grid;
+	gap: 8px;
+}
+
+.amc-custom-dashboard__nav a,
+.amc-custom-dashboard__utility {
+	padding: 12px 14px;
+	border-radius: 14px;
+	color: #b6aea2;
+	text-decoration: none;
+	font-weight: 600;
+}
+
+.amc-custom-dashboard__nav a:hover,
+.amc-custom-dashboard__nav a.is-active,
+.amc-custom-dashboard__utility:hover {
+	background: rgba(255, 255, 255, 0.07);
+	color: #f4efe6;
+}
+
+.amc-custom-dashboard__sidebar-footer {
+	margin-top: auto;
+	padding-top: 16px;
+	border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.amc-custom-dashboard__main {
+	padding: 22px;
+}
+
+.amc-admin-topbar--dashboard {
+	margin-bottom: 22px;
+}
+
+@media (max-width: 1080px) {
+	.amc-custom-dashboard {
+		grid-template-columns: 1fr;
+	}
+}
+
+@media (max-width: 782px) {
+	.amc-dashboard-page .amc-site-shell,
+	.amc-custom-dashboard__main,
+	.amc-custom-dashboard__sidebar {
+		padding: 14px;
+	}
+}

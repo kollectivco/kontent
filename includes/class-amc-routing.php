@@ -19,6 +19,8 @@ class AMC_Routing {
 		add_rewrite_rule( '^' . AMC_ROUTE_BASE . '/charts/([^/]+)/?$', 'index.php?amc_route=chart&amc_chart=$matches[1]', 'top' );
 		add_rewrite_rule( '^' . AMC_ROUTE_BASE . '/track/([^/]+)/?$', 'index.php?amc_route=track&amc_track=$matches[1]', 'top' );
 		add_rewrite_rule( '^' . AMC_ROUTE_BASE . '/artist/([^/]+)/?$', 'index.php?amc_route=artist&amc_artist=$matches[1]', 'top' );
+		add_rewrite_rule( '^charts-dashboard/?$', 'index.php?amc_route=dashboard&amc_dashboard=dashboard', 'top' );
+		add_rewrite_rule( '^charts-dashboard/([^/]+)/?$', 'index.php?amc_route=dashboard&amc_dashboard=$matches[1]', 'top' );
 	}
 
 	/**
@@ -32,6 +34,7 @@ class AMC_Routing {
 		$vars[] = 'amc_chart';
 		$vars[] = 'amc_track';
 		$vars[] = 'amc_artist';
+		$vars[] = 'amc_dashboard';
 
 		return $vars;
 	}
@@ -67,6 +70,10 @@ class AMC_Routing {
 			case 'artist':
 				$artist = AMC_Data::get_artist_by_slug( get_query_var( 'amc_artist' ) );
 				return array( 'title' => $artist ? $artist['name'] : 'Artist' );
+			case 'dashboard':
+				$sections = AMC_Admin_Data::dashboard_sections();
+				$key      = get_query_var( 'amc_dashboard' ) ? get_query_var( 'amc_dashboard' ) : 'dashboard';
+				return array( 'title' => ! empty( $sections[ $key ]['title'] ) ? 'Kontentainment Charts - ' . $sections[ $key ]['title'] : 'Kontentainment Charts - Dashboard' );
 			default:
 				return array( 'title' => get_bloginfo( 'name' ) );
 		}
@@ -96,6 +103,8 @@ class AMC_Routing {
 				return AMC_PLUGIN_DIR . 'templates/track-single.php';
 			case 'artist':
 				return AMC_PLUGIN_DIR . 'templates/artist-single.php';
+			case 'dashboard':
+				return AMC_PLUGIN_DIR . 'templates/dashboard.php';
 			default:
 				return $template;
 		}

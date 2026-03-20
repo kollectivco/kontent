@@ -3,7 +3,7 @@ Contributors: kollectivco
 Tags: music, charts, artists, tracks, albums
 Requires at least: 6.0
 Tested up to: 6.5
-Stable tag: 2.0.0
+Stable tag: 2.1.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -21,7 +21,7 @@ Features:
 * Track and artist detail routes
 * Seeded demo artists, tracks, albums, and chart entries
 * GitHub-based update flow for future plugin versions
-* Plugin-owned admin control center for charts, entries, uploads, scoring, publishing, and archives
+* Hybrid admin architecture with lightweight wp-admin controls and a full custom dashboard at `/charts-dashboard`
 
 == Installation ==
 
@@ -30,6 +30,9 @@ Features:
 3. Visit Settings > Permalinks once or reactivate the plugin to refresh routes.
 
 == Changelog ==
+
+= 2.1.0 =
+* Added hybrid admin architecture with lightweight wp-admin controls and a full custom dashboard at `/charts-dashboard`.
 
 = 2.0.0 =
 * Added Phase 2 plugin-owned admin dashboard UI for Kontentainment Charts.

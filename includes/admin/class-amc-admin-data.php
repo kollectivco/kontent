@@ -32,6 +32,61 @@ class AMC_Admin_Data {
 	}
 
 	/**
+	 * Lightweight wp-admin pages.
+	 *
+	 * @return array
+	 */
+	public static function wp_admin_pages() {
+		return array(
+			'overview'       => array( 'menu_slug' => 'kontentainment-charts', 'title' => 'Overview' ),
+			'settings'       => array( 'menu_slug' => 'kontentainment-charts-settings', 'title' => 'Settings' ),
+			'tools'          => array( 'menu_slug' => 'kontentainment-charts-tools', 'title' => 'Tools' ),
+			'logs'           => array( 'menu_slug' => 'kontentainment-charts-logs', 'title' => 'Logs' ),
+			'permissions'    => array( 'menu_slug' => 'kontentainment-charts-permissions', 'title' => 'Permissions' ),
+			'open-dashboard' => array( 'menu_slug' => 'kontentainment-charts-open-dashboard', 'title' => 'Open Dashboard' ),
+		);
+	}
+
+	/**
+	 * Full dashboard sections.
+	 *
+	 * @return array
+	 */
+	public static function dashboard_sections() {
+		return array(
+			'dashboard'      => array( 'title' => 'Dashboard', 'path' => '' ),
+			'charts'         => array( 'title' => 'Charts', 'path' => 'charts' ),
+			'weekly-entries' => array( 'title' => 'Weekly Entries', 'path' => 'weekly-entries' ),
+			'tracks'         => array( 'title' => 'Tracks', 'path' => 'tracks' ),
+			'artists'        => array( 'title' => 'Artists', 'path' => 'artists' ),
+			'albums'         => array( 'title' => 'Albums', 'path' => 'albums' ),
+			'uploads'        => array( 'title' => 'Source Uploads', 'path' => 'uploads' ),
+			'cleaning'       => array( 'title' => 'Matching and Cleaning', 'path' => 'cleaning' ),
+			'scoring'        => array( 'title' => 'Scoring Rules', 'path' => 'scoring' ),
+			'publishing'     => array( 'title' => 'Publishing', 'path' => 'publishing' ),
+			'archives'       => array( 'title' => 'Archive Management', 'path' => 'archives' ),
+			'users'          => array( 'title' => 'Users and Roles', 'path' => 'users' ),
+			'settings'       => array( 'title' => 'Settings', 'path' => 'settings' ),
+		);
+	}
+
+	/**
+	 * Resolve custom dashboard url.
+	 *
+	 * @param string $section Section key.
+	 * @return string
+	 */
+	public static function custom_dashboard_url( $section = 'dashboard' ) {
+		$sections = self::dashboard_sections();
+
+		if ( empty( $sections[ $section ] ) || empty( $sections[ $section ]['path'] ) ) {
+			return home_url( '/charts-dashboard/' );
+		}
+
+		return home_url( '/charts-dashboard/' . $sections[ $section ]['path'] . '/' );
+	}
+
+	/**
 	 * Overview counts.
 	 *
 	 * @return array
@@ -268,6 +323,46 @@ class AMC_Admin_Data {
 			'Methodology text' => 'Custom weighted methodology summary',
 			'Language' => 'English',
 			'Date format' => 'F j, Y',
+		);
+	}
+
+	/**
+	 * Logs data.
+	 *
+	 * @return array
+	 */
+	public static function logs() {
+		return array(
+			array( 'time' => '2026-03-20 11:43', 'event' => 'Chart week draft saved', 'actor' => 'Dalia Hassan', 'status' => 'Info' ),
+			array( 'time' => '2026-03-20 11:10', 'event' => 'Shazam upload flagged duplicate candidates', 'actor' => 'System', 'status' => 'Warning' ),
+			array( 'time' => '2026-03-20 10:52', 'event' => 'Manual score override prepared', 'actor' => 'Mina Farid', 'status' => 'Review' ),
+		);
+	}
+
+	/**
+	 * Tools data.
+	 *
+	 * @return array
+	 */
+	public static function tools() {
+		return array(
+			array( 'tool' => 'Rebuild seeded admin previews', 'description' => 'Refresh UI demo datasets for dashboard screens.', 'action' => 'Run preview rebuild' ),
+			array( 'tool' => 'Flush dashboard routes', 'description' => 'Re-register public and dashboard routes after structural changes.', 'action' => 'Flush routes' ),
+			array( 'tool' => 'Export UI snapshot', 'description' => 'Generate a management-state export for review.', 'action' => 'Export snapshot' ),
+		);
+	}
+
+	/**
+	 * Permission presets.
+	 *
+	 * @return array
+	 */
+	public static function permissions() {
+		return array(
+			array( 'role' => 'Admin', 'dashboard_access' => 'Full', 'publishing' => 'Allowed', 'settings' => 'Allowed' ),
+			array( 'role' => 'Editor', 'dashboard_access' => 'Full dashboard', 'publishing' => 'Allowed', 'settings' => 'Restricted' ),
+			array( 'role' => 'Data Manager', 'dashboard_access' => 'Operational sections', 'publishing' => 'Restricted', 'settings' => 'Restricted' ),
+			array( 'role' => 'Viewer', 'dashboard_access' => 'Read only', 'publishing' => 'Blocked', 'settings' => 'Blocked' ),
 		);
 	}
 }
