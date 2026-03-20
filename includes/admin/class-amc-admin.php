@@ -104,7 +104,7 @@ class AMC_Admin {
 		$admin_page = self::find_admin_page_by_slug( $slug );
 		$legacy     = self::find_legacy_page_by_slug( $slug );
 
-		echo '<div class="wrap amc-admin-wrap"><div class="amc-admin-shell">';
+		echo '<div class="wrap amc-admin-wrap"><div class="amc-admin-shell" data-amc-theme="dark">';
 
 		if ( $admin_page ) {
 			self::render_wp_admin_shell( $admin_page['key'], $admin_page['page']['title'] );
@@ -135,7 +135,7 @@ class AMC_Admin {
 		$sections = AMC_Admin_Data::dashboard_sections();
 		$title    = $sections[ $key ]['title'];
 		?>
-		<div class="amc-custom-dashboard">
+		<div class="amc-custom-dashboard" data-amc-theme="dark">
 			<div class="amc-custom-dashboard__sidebar">
 				<div class="amc-custom-dashboard__brand">
 					<span>KC</span>
@@ -163,6 +163,7 @@ class AMC_Admin {
 						<p class="amc-admin-subcopy">This is the main working experience for managing charts, weekly entries, tracks, artists, albums, uploads, methodology, publishing, archives, users, and settings.</p>
 					</div>
 					<div class="amc-admin-topbar__actions">
+						<?php self::render_theme_toggle(); ?>
 						<a class="button button-secondary" href="<?php echo esc_url( admin_url( 'admin.php?page=kontentainment-charts-settings' ) ); ?>">wp-admin Settings</a>
 						<button type="button" class="button button-primary">New Working Draft</button>
 					</div>
@@ -205,6 +206,7 @@ class AMC_Admin {
 				<p class="amc-admin-subcopy">wp-admin remains the lightweight plugin control layer for overview, settings, logs, tools, permissions, and fast access into the full custom dashboard.</p>
 			</div>
 			<div class="amc-admin-topbar__actions">
+				<?php self::render_theme_toggle(); ?>
 				<a class="button button-primary" href="<?php echo esc_url( AMC_Admin_Data::custom_dashboard_url() ); ?>">Open Dashboard</a>
 			</div>
 		</header>
@@ -263,6 +265,7 @@ class AMC_Admin {
 				<p class="amc-admin-subcopy">This legacy wp-admin page remains available for compatibility, but the full working experience now lives inside the custom dashboard.</p>
 			</div>
 			<div class="amc-admin-topbar__actions">
+				<?php self::render_theme_toggle(); ?>
 				<a class="button button-primary" href="<?php echo esc_url( $target ); ?>">Open In /charts-dashboard</a>
 			</div>
 		</header>
@@ -919,5 +922,14 @@ class AMC_Admin {
 			printf( '<button type="button" class="button %1$s">%2$s</button>', esc_attr( $class ), esc_html( $label ) );
 		}
 		echo '</div>';
+	}
+
+	/**
+	 * Render theme toggle button.
+	 *
+	 * @return void
+	 */
+	private static function render_theme_toggle() {
+		echo '<button type="button" class="button button-secondary amc-theme-toggle" data-amc-theme-toggle data-amc-theme-label-dark="Light Mode" data-amc-theme-label-light="Dark Mode" aria-pressed="false">Light Mode</button>';
 	}
 }

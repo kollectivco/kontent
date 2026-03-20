@@ -3,7 +3,7 @@
  * Plugin Name: Kontentainment Charts
  * Plugin URI: https://github.com/kollectivco/kontent
  * Description: Public-facing charts platform and control center for Kontentainment Charts.
- * Version: 2.1.2
+ * Version: 2.1.3
  * Author: Codex
  * License: GPL2+
  * Text Domain: arabic-music-charts
@@ -14,7 +14,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'AMC_PLUGIN_VERSION', '2.1.2' );
+define( 'AMC_PLUGIN_VERSION', '2.1.3' );
 define( 'AMC_PLUGIN_FILE', __FILE__ );
 define( 'AMC_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'AMC_PLUGIN_URL', plugin_dir_url( __FILE__ ) );

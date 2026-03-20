@@ -3,7 +3,7 @@ Contributors: kollectivco
 Tags: music, charts, artists, tracks, albums
 Requires at least: 6.0
 Tested up to: 6.5
-Stable tag: 2.1.2
+Stable tag: 2.1.3
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -30,6 +30,9 @@ Features:
 3. Visit Settings > Permalinks once or reactivate the plugin to refresh routes.
 
 == Changelog ==
+
+= 2.1.3 =
+* Added a shared dark/light theme system for wp-admin pages and the custom dashboard, with dark mode as the default and persistent theme switching.
 
 = 2.1.2 =
 * Improved admin and custom dashboard contrast, surface separation, and readability.
