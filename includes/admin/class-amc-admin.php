@@ -134,7 +134,7 @@ class AMC_Admin {
 		}
 
 		if ( ! current_user_can( 'amc_view_dashboard' ) ) {
-			wp_die( esc_html__( 'You do not have permission to access Kontentainment Charts dashboard.', 'arabic-music-charts' ) );
+			wp_die( esc_html__( 'You do not have permission to access Kontentainment Charts dashboard.', 'kontentainment-charts' ) );
 		}
 
 		$key      = self::get_dashboard_section_key();
@@ -2228,7 +2228,7 @@ class AMC_Admin {
 	 */
 	public static function handle_save_entity() {
 		if ( ! current_user_can( 'amc_view_dashboard' ) ) {
-			wp_die( esc_html__( 'You do not have permission to save Kontentainment Charts data.', 'arabic-music-charts' ) );
+			wp_die( esc_html__( 'You do not have permission to save Kontentainment Charts data.', 'kontentainment-charts' ) );
 		}
 
 		check_admin_referer( 'amc_save_entity' );
@@ -2404,7 +2404,7 @@ class AMC_Admin {
 	 */
 	public static function handle_row_action() {
 		if ( ! current_user_can( 'amc_view_dashboard' ) ) {
-			wp_die( esc_html__( 'You do not have permission to manage Kontentainment Charts records.', 'arabic-music-charts' ) );
+			wp_die( esc_html__( 'You do not have permission to manage Kontentainment Charts records.', 'kontentainment-charts' ) );
 		}
 
 		check_admin_referer( 'amc_row_action' );
@@ -2796,7 +2796,7 @@ class AMC_Admin {
 	 */
 	private static function assert_cap( $cap ) {
 		if ( ! current_user_can( $cap ) ) {
-			wp_die( esc_html__( 'You do not have permission to perform this action.', 'arabic-music-charts' ) );
+			wp_die( esc_html__( 'You do not have permission to perform this action.', 'kontentainment-charts' ) );
 		}
 	}
 

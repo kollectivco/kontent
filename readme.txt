@@ -3,7 +3,7 @@ Contributors: kollectivco
 Tags: music, charts, artists, tracks, albums
 Requires at least: 6.0
 Tested up to: 6.5
-Stable tag: 4.3.0
+Stable tag: 4.3.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -29,6 +29,9 @@ Features:
 3. Visit Settings > Permalinks once or reactivate the plugin to refresh routes.
 
 == Changelog ==
+
+= 4.3.1 =
+* Fixed plugin identity and packaging so Kontentainment Charts installs as its own standalone plugin with the `kontentainment-charts` folder, `kontentainment-charts.php` main file, and a packaged ZIP rooted at `kontentainment-charts/`.
 
 = 4.3.0 =
 * Added retry/backoff metadata, bulk queue and notification actions, external email/webhook alerts, richer notification linking, and deeper job history analytics for operational monitoring.

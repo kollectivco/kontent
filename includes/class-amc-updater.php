@@ -14,6 +14,11 @@ class AMC_Updater {
 	const REPO = 'kollectivco/kontent';
 
 	/**
+	 * Packaged ZIP file name.
+	 */
+	const PACKAGE_FILE = 'kontentainment-charts.zip';
+
+	/**
 	 * Bootstrap hooks.
 	 *
 	 * @return void
@@ -47,7 +52,7 @@ class AMC_Updater {
 		}
 
 		$transient->response[ $plugin_basename ] = (object) array(
-			'slug'        => dirname( $plugin_basename ),
+			'slug'        => AMC_PLUGIN_SLUG,
 			'plugin'      => $plugin_basename,
 			'new_version' => $release['version'],
 			'url'         => 'https://github.com/' . self::REPO,
@@ -75,7 +80,7 @@ class AMC_Updater {
 		}
 
 		$plugin_basename = plugin_basename( AMC_PLUGIN_FILE );
-		$plugin_slug     = dirname( $plugin_basename );
+		$plugin_slug     = AMC_PLUGIN_SLUG;
 
 		if ( $args->slug !== $plugin_slug ) {
 			return $result;
@@ -115,8 +120,7 @@ class AMC_Updater {
 
 		global $wp_filesystem;
 
-		$plugin_dir_name = dirname( plugin_basename( AMC_PLUGIN_FILE ) );
-		$target          = WP_PLUGIN_DIR . '/' . $plugin_dir_name;
+		$target = WP_PLUGIN_DIR . '/' . AMC_PLUGIN_SLUG;
 
 		if ( ! empty( $result['destination'] ) && ! empty( $wp_filesystem ) ) {
 			$wp_filesystem->move( $result['destination'], $target, true );
@@ -149,7 +153,7 @@ class AMC_Updater {
 		$links[] = sprintf(
 			'<a href="%s">%s</a>',
 			esc_url( self::check_updates_url() ),
-			esc_html__( 'Check for updates', 'arabic-music-charts' )
+			esc_html__( 'Check for updates', 'kontentainment-charts' )
 		);
 
 		return $links;
@@ -286,7 +290,7 @@ class AMC_Updater {
 
 			$data = array(
 				'version' => ltrim( $tag, 'v' ),
-				'package' => 'https://github.com/' . self::REPO . '/archive/refs/tags/' . rawurlencode( $tag ) . '.zip',
+				'package' => self::package_url_for_tag( $tag ),
 				'body'    => 'Tagged release from GitHub.',
 			);
 
@@ -302,7 +306,7 @@ class AMC_Updater {
 
 		$data = array(
 			'version'  => ltrim( $release['tag_name'], 'v' ),
-			'package'  => ! empty( $release['zipball_url'] ) ? $release['zipball_url'] : '',
+			'package'  => self::release_package_url( $release ),
 			'body'     => ! empty( $release['body'] ) ? wp_strip_all_tags( $release['body'] ) : '',
 			'requires' => '6.0',
 			'tested'   => get_bloginfo( 'version' ),
@@ -311,5 +315,41 @@ class AMC_Updater {
 		set_site_transient( $cache_key, $data, 6 * HOUR_IN_SECONDS );
 
 		return $data;
+	}
+
+	/**
+	 * Resolve packaged zip URL for a tag.
+	 *
+	 * @param string $tag Tag name.
+	 * @return string
+	 */
+	private static function package_url_for_tag( $tag ) {
+		return 'https://raw.githubusercontent.com/' . self::REPO . '/' . rawurlencode( $tag ) . '/dist/' . self::PACKAGE_FILE;
+	}
+
+	/**
+	 * Resolve release package URL.
+	 *
+	 * @param array $release Release payload.
+	 * @return string
+	 */
+	private static function release_package_url( $release ) {
+		if ( ! empty( $release['assets'] ) && is_array( $release['assets'] ) ) {
+			foreach ( $release['assets'] as $asset ) {
+				if ( empty( $asset['name'] ) || self::PACKAGE_FILE !== $asset['name'] ) {
+					continue;
+				}
+
+				if ( ! empty( $asset['browser_download_url'] ) ) {
+					return $asset['browser_download_url'];
+				}
+			}
+		}
+
+		if ( ! empty( $release['tag_name'] ) ) {
+			return self::package_url_for_tag( $release['tag_name'] );
+		}
+
+		return '';
 	}
 }

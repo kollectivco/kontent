@@ -80,10 +80,10 @@ class AMC_Plugin {
 		register_post_type(
 			'amc_artist',
 			array(
-				'label'               => __( 'Artists', 'arabic-music-charts' ),
+				'label'               => __( 'Artists', 'kontentainment-charts' ),
 				'labels'              => array(
-					'name'          => __( 'Artists', 'arabic-music-charts' ),
-					'singular_name' => __( 'Artist', 'arabic-music-charts' ),
+					'name'          => __( 'Artists', 'kontentainment-charts' ),
+					'singular_name' => __( 'Artist', 'kontentainment-charts' ),
 				),
 				'public'              => false,
 				'show_ui'             => false,
@@ -99,10 +99,10 @@ class AMC_Plugin {
 		register_post_type(
 			'amc_track',
 			array(
-				'label'               => __( 'Tracks', 'arabic-music-charts' ),
+				'label'               => __( 'Tracks', 'kontentainment-charts' ),
 				'labels'              => array(
-					'name'          => __( 'Tracks', 'arabic-music-charts' ),
-					'singular_name' => __( 'Track', 'arabic-music-charts' ),
+					'name'          => __( 'Tracks', 'kontentainment-charts' ),
+					'singular_name' => __( 'Track', 'kontentainment-charts' ),
 				),
 				'public'              => false,
 				'show_ui'             => false,
@@ -118,10 +118,10 @@ class AMC_Plugin {
 		register_post_type(
 			'amc_album',
 			array(
-				'label'               => __( 'Albums', 'arabic-music-charts' ),
+				'label'               => __( 'Albums', 'kontentainment-charts' ),
 				'labels'              => array(
-					'name'          => __( 'Albums', 'arabic-music-charts' ),
-					'singular_name' => __( 'Album', 'arabic-music-charts' ),
+					'name'          => __( 'Albums', 'kontentainment-charts' ),
+					'singular_name' => __( 'Album', 'kontentainment-charts' ),
 				),
 				'public'              => false,
 				'show_ui'             => false,
@@ -137,10 +137,10 @@ class AMC_Plugin {
 		register_post_type(
 			'amc_chart',
 			array(
-				'label'               => __( 'Charts', 'arabic-music-charts' ),
+				'label'               => __( 'Charts', 'kontentainment-charts' ),
 				'labels'              => array(
-					'name'          => __( 'Charts', 'arabic-music-charts' ),
-					'singular_name' => __( 'Chart', 'arabic-music-charts' ),
+					'name'          => __( 'Charts', 'kontentainment-charts' ),
+					'singular_name' => __( 'Chart', 'kontentainment-charts' ),
 				),
 				'public'              => false,
 				'show_ui'             => false,
@@ -157,7 +157,7 @@ class AMC_Plugin {
 			'amc_chart_group',
 			array( 'amc_chart' ),
 			array(
-				'label'              => __( 'Chart Groups', 'arabic-music-charts' ),
+				'label'              => __( 'Chart Groups', 'kontentainment-charts' ),
 				'public'             => false,
 				'show_ui'            => false,
 				'hierarchical'       => true,
