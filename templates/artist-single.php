@@ -36,6 +36,10 @@ include AMC_PLUGIN_DIR . 'templates/parts/site-header.php';
 						<div><strong><?php echo esc_html( count( $tracks ) ); ?></strong><span>Linked Tracks</span></div>
 						<div><strong><?php echo esc_html( count( $artist_positions ) ); ?></strong><span>Chart Appearances</span></div>
 					</div>
+					<div class="amc-detail-hero__actions">
+						<a class="amc-button" href="<?php echo esc_url( AMC_Data::route_url( 'artists' ) ); ?>">All Artists</a>
+						<a class="amc-button amc-button--ghost" href="<?php echo esc_url( AMC_Data::route_url( 'about' ) ); ?>">About Charts</a>
+					</div>
 				</div>
 			</div>
 		</section>

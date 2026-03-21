@@ -10,6 +10,9 @@ if ( ! defined( 'ABSPATH' ) ) {
 $nav_items = array(
 	array( 'label' => 'Home', 'url' => AMC_Data::route_url() ),
 	array( 'label' => 'Charts', 'url' => AMC_Data::route_url( 'charts' ) ),
+	array( 'label' => 'Artists', 'url' => AMC_Data::route_url( 'artists' ) ),
+	array( 'label' => 'Tracks', 'url' => AMC_Data::route_url( 'tracks' ) ),
+	array( 'label' => 'About', 'url' => AMC_Data::route_url( 'about' ) ),
 	array( 'label' => 'Top Artists', 'url' => AMC_Data::route_url( 'charts/top-artists' ) ),
 	array( 'label' => 'Top Tracks', 'url' => AMC_Data::route_url( 'charts/top-tracks' ) ),
 	array( 'label' => 'Top Albums', 'url' => AMC_Data::route_url( 'charts/top-albums' ) ),

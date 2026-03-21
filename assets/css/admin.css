@@ -171,6 +171,45 @@
 	gap: 18px;
 }
 
+.amc-admin-workflow {
+	padding: 0;
+}
+
+.amc-admin-workflow__grid {
+	display: grid;
+	grid-template-columns: repeat(7, minmax(0, 1fr));
+	gap: 12px;
+}
+
+.amc-admin-workflow__step {
+	padding: 14px 16px;
+	border: 1px solid var(--amc-theme-border);
+	border-radius: 18px;
+	background:
+		linear-gradient(180deg, var(--amc-theme-surface-glow), transparent 34%),
+		linear-gradient(180deg, var(--amc-theme-surface-elevated), var(--amc-theme-surface));
+	box-shadow: var(--amc-theme-shadow);
+}
+
+.amc-admin-workflow__step strong {
+	display: block;
+	margin-bottom: 5px;
+	color: var(--amc-theme-text-heading);
+	font-size: 14px;
+}
+
+.amc-admin-workflow__step span {
+	color: var(--amc-theme-text-muted);
+	font-size: 11px;
+	font-weight: 700;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+}
+
+.amc-admin-workflow__step.is-active {
+	border-color: var(--amc-theme-accent);
+}
+
 .amc-admin-grid {
 	display: grid;
 	gap: 18px;
@@ -182,6 +221,10 @@
 
 .amc-admin-grid--split {
 	grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.amc-admin-grid--bento > .amc-admin-panel:first-child {
+	min-height: 100%;
 }
 
 .amc-admin-card {
@@ -268,6 +311,21 @@
 	font-weight: 500;
 }
 
+.amc-admin-inline-links {
+	margin-top: 6px;
+	color: var(--amc-theme-text-muted);
+	font-size: 12px;
+}
+
+.amc-admin-inline-links a {
+	color: var(--amc-theme-accent);
+	text-decoration: none;
+}
+
+.amc-admin-inline-links a:hover {
+	text-decoration: underline;
+}
+
 .amc-admin-table tbody tr:last-child td {
 	border-bottom: 0;
 }
@@ -326,6 +384,41 @@
 	flex-wrap: wrap;
 	gap: 10px;
 	margin-top: 18px;
+}
+
+.amc-admin-badge {
+	display: inline-flex;
+	align-items: center;
+	padding: 6px 10px;
+	border-radius: 999px;
+	border: 1px solid var(--amc-theme-border-strong);
+	background: var(--amc-theme-button-bg);
+	color: var(--amc-theme-text-heading);
+	font-size: 11px;
+	font-weight: 700;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+}
+
+.amc-admin-badge--matched-automatically {
+	border-color: var(--amc-theme-info-border);
+	color: var(--amc-theme-info);
+}
+
+.amc-admin-badge--ready-to-create {
+	border-color: rgba(107, 233, 160, 0.45);
+	color: var(--amc-theme-success);
+}
+
+.amc-admin-badge--possible-duplicate,
+.amc-admin-badge--review-needed {
+	border-color: var(--amc-theme-warning-border);
+	color: var(--amc-theme-warning);
+}
+
+.amc-admin-badge--unmatched {
+	border-color: var(--amc-theme-danger-border);
+	color: var(--amc-theme-danger);
 }
 
 .amc-admin-alerts {
@@ -441,6 +534,7 @@
 }
 
 @media (max-width: 1180px) {
+	.amc-admin-workflow__grid,
 	.amc-admin-grid--cards,
 	.amc-admin-grid--split,
 	.amc-admin-form {
@@ -453,6 +547,7 @@
 }
 
 @media (max-width: 782px) {
+	.amc-admin-workflow__grid,
 	.amc-admin-grid--cards,
 	.amc-admin-grid--split,
 	.amc-admin-form {

@@ -42,6 +42,7 @@ class AMC_Plugin {
 		add_filter( 'template_include', array( 'AMC_Routing', 'template_include' ) );
 		add_filter( 'document_title_parts', array( $this, 'filter_document_title' ) );
 
+		AMC_Ingestion::boot();
 		AMC_Updater::boot();
 		AMC_Admin::boot();
 	}

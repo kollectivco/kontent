@@ -3,7 +3,7 @@ Contributors: kollectivco
 Tags: music, charts, artists, tracks, albums
 Requires at least: 6.0
 Tested up to: 6.5
-Stable tag: 4.0.0
+Stable tag: 4.3.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -29,6 +29,18 @@ Features:
 3. Visit Settings > Permalinks once or reactivate the plugin to refresh routes.
 
 == Changelog ==
+
+= 4.3.0 =
+* Added retry/backoff metadata, bulk queue and notification actions, external email/webhook alerts, richer notification linking, and deeper job history analytics for operational monitoring.
+
+= 4.2.0 =
+* Added a real jobs and queue view, operator notification center, retry/cancel/rerun controls, queue safety locks, richer observability widgets, and deeper job-linked diagnostics without changing the existing dashboard architecture.
+
+= 4.1.0 =
+* Added background-safe job foundations, job states, operator notifications, stronger generation/publish safety checks, and richer operational dashboard visibility for queued, running, failed, and review-heavy workflow states.
+
+= 4.0.1 =
+* Refined admin workflow clarity with Bento-style dashboard grouping, clearer matching states, explicit auto-create behavior, and added public discovery pages for artists, tracks, and chart methodology.
 
 = 4.0.0 =
 * Added a first-time onboarding flow, production setup checklist, guided first live data workflow, source-specific upload guidance, first publish review summary, and improved zero-data public/admin states without reintroducing any demo content.

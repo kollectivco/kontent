@@ -336,6 +336,92 @@ class AMC_Data {
 	}
 
 	/**
+	 * Public artist index.
+	 *
+	 * @return array
+	 */
+	public static function get_public_artists() {
+		$rows = AMC_DB::get_rows(
+			'artists',
+			array(
+				'where'    => array( 'status' => 'active' ),
+				'order_by' => 'name ASC',
+			)
+		);
+
+		return array_values(
+			array_filter(
+				array_map(
+					function ( $row ) {
+						return self::get_entity( 'artist', (int) $row['id'] );
+					},
+					$rows
+				)
+			)
+		);
+	}
+
+	/**
+	 * Public track index.
+	 *
+	 * @return array
+	 */
+	public static function get_public_tracks() {
+		$rows = AMC_DB::get_rows(
+			'tracks',
+			array(
+				'where'    => array( 'status' => 'active' ),
+				'order_by' => 'title ASC',
+			)
+		);
+
+		return array_values(
+			array_filter(
+				array_map(
+					function ( $row ) {
+						return self::get_entity( 'track', (int) $row['id'] );
+					},
+					$rows
+				)
+			)
+		);
+	}
+
+	/**
+	 * Chart history items.
+	 *
+	 * @param string $slug Chart slug.
+	 * @param int    $limit Limit.
+	 * @return array
+	 */
+	public static function get_chart_history( $slug, $limit = 6 ) {
+		$chart = AMC_DB::get_row_by_slug( 'charts', $slug );
+
+		if ( ! $chart ) {
+			return array();
+		}
+
+		$weeks = AMC_DB::get_chart_weeks(
+			array(
+				'chart_id' => (int) $chart['id'],
+			)
+		);
+
+		$history = array();
+
+		foreach ( array_slice( $weeks, 0, $limit ) as $week ) {
+			$history[] = array(
+				'week_date'   => $week['week_date'],
+				'country'     => ! empty( $week['country'] ) ? $week['country'] : 'Global',
+				'status'      => ucfirst( $week['status'] ),
+				'entry_count' => count( AMC_DB::get_chart_entries( (int) $week['id'] ) ),
+			);
+		}
+
+		return $history;
+	}
+
+	/**
 	 * Featured tracks for artist page.
 	 *
 	 * @param int $artist_id Artist ID.

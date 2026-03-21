@@ -39,6 +39,7 @@ include AMC_PLUGIN_DIR . 'templates/parts/site-header.php';
 					<div class="amc-detail-hero__actions">
 						<a class="amc-button" href="<?php echo esc_url( $track['artist']['url'] ); ?>">Open Artist</a>
 						<a class="amc-button amc-button--ghost" href="<?php echo esc_url( AMC_Data::route_url( 'charts/hot-100-tracks' ) ); ?>">Back To Hot 100</a>
+						<a class="amc-button amc-button--ghost" href="<?php echo esc_url( AMC_Data::route_url( 'tracks' ) ); ?>">All Tracks</a>
 					</div>
 				</div>
 			</div>

@@ -11,7 +11,7 @@ class AMC_DB {
 	/**
 	 * Database version.
 	 */
-	const VERSION = '1.4.0';
+	const VERSION = '1.8.0';
 
 	/**
 	 * Table suffixes.
@@ -32,6 +32,7 @@ class AMC_DB {
 			'matching_queue'    => 'amc_matching_queue',
 			'scoring_rules'     => 'amc_scoring_rules',
 			'ingestion_logs'    => 'amc_ingestion_logs',
+			'jobs'              => 'amc_jobs',
 		);
 	}
 
@@ -72,6 +73,7 @@ class AMC_DB {
 		$matching_queue  = self::table( 'matching_queue' );
 		$scoring_rules   = self::table( 'scoring_rules' );
 		$ingestion_logs  = self::table( 'ingestion_logs' );
+		$jobs            = self::table( 'jobs' );
 
 		dbDelta(
 			"CREATE TABLE {$charts} (
@@ -308,6 +310,9 @@ class AMC_DB {
 				matching_status varchar(20) NOT NULL DEFAULT 'pending',
 				match_confidence decimal(5,2) NOT NULL DEFAULT 0.00,
 				match_confidence_label varchar(32) NULL,
+				match_resolution varchar(32) NULL,
+				auto_created_entity_type varchar(20) NULL,
+				auto_created_entity_id bigint(20) unsigned NOT NULL DEFAULT 0,
 				created_at datetime NOT NULL,
 				updated_at datetime NOT NULL,
 				PRIMARY KEY  (id),
@@ -331,7 +336,10 @@ class AMC_DB {
 				candidate_entity_id bigint(20) unsigned NOT NULL DEFAULT 0,
 				candidate_label varchar(191) NULL,
 				confidence decimal(5,2) NOT NULL DEFAULT 0.00,
+				confidence_label varchar(32) NULL,
 				match_basis varchar(191) NULL,
+				row_type varchar(32) NULL,
+				action_hint varchar(191) NULL,
 				status varchar(20) NOT NULL DEFAULT 'pending',
 				override_entity_type varchar(20) NULL,
 				override_entity_id bigint(20) unsigned NOT NULL DEFAULT 0,
@@ -377,6 +385,41 @@ class AMC_DB {
 				KEY upload_id (upload_id),
 				KEY source_row_id (source_row_id),
 				KEY level (level)
+			) {$charset_collate};"
+		);
+
+		dbDelta(
+			"CREATE TABLE {$jobs} (
+				id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+				job_type varchar(64) NOT NULL,
+				job_group varchar(64) NULL,
+				status varchar(20) NOT NULL DEFAULT 'queued',
+				lock_key varchar(191) NULL,
+				trigger_mode varchar(20) NOT NULL DEFAULT 'manual',
+				initiated_by bigint(20) unsigned NOT NULL DEFAULT 0,
+				reference_type varchar(64) NULL,
+				reference_id bigint(20) unsigned NOT NULL DEFAULT 0,
+				chart_id bigint(20) unsigned NOT NULL DEFAULT 0,
+				country varchar(64) NULL,
+				week_date date NULL,
+				attempts int(11) NOT NULL DEFAULT 0,
+				max_attempts int(11) NOT NULL DEFAULT 3,
+				retry_delay_seconds int(11) NOT NULL DEFAULT 300,
+				next_retry_at datetime NULL,
+				last_error_step varchar(64) NULL,
+				payload longtext NULL,
+				result_data longtext NULL,
+				error_message text NULL,
+				started_at datetime NULL,
+				completed_at datetime NULL,
+				created_at datetime NOT NULL,
+				updated_at datetime NOT NULL,
+				PRIMARY KEY  (id),
+				KEY status (status),
+				KEY job_type (job_type),
+				KEY lock_key (lock_key),
+				KEY reference_lookup (reference_type, reference_id),
+				KEY chart_lookup (chart_id, country, week_date)
 			) {$charset_collate};"
 		);
 
@@ -533,6 +576,155 @@ class AMC_DB {
 	}
 
 	/**
+	 * Jobs summary.
+	 *
+	 * @return array
+	 */
+	public static function jobs_summary() {
+		return array(
+			'queued'    => self::count_rows( 'jobs', array( 'status' => 'queued' ) ),
+			'running'   => self::count_rows( 'jobs', array( 'status' => 'running' ) ),
+			'completed' => self::count_rows( 'jobs', array( 'status' => 'completed' ) ),
+			'failed'    => self::count_rows( 'jobs', array( 'status' => 'failed' ) ),
+			'cancelled' => self::count_rows( 'jobs', array( 'status' => 'cancelled' ) ),
+		);
+	}
+
+	/**
+	 * Query jobs with optional filters.
+	 *
+	 * @param array $filters Filters.
+	 * @return array
+	 */
+	public static function get_jobs( $filters = array() ) {
+		global $wpdb;
+
+		$defaults      = array(
+			'status'         => '',
+			'job_type'       => '',
+			'reference_type' => '',
+			'reference_id'   => 0,
+			'chart_id'       => 0,
+			'country'        => '',
+			'week_date'      => '',
+			'limit'          => 100,
+		);
+		$filters       = wp_parse_args( $filters, $defaults );
+		$jobs_table    = self::table( 'jobs' );
+		$charts_table  = self::table( 'charts' );
+		$uploads_table = self::table( 'source_uploads' );
+		$where         = array( '1=1' );
+		$values        = array();
+
+		if ( ! empty( $filters['status'] ) ) {
+			$where[]  = 'j.status = %s';
+			$values[] = (string) $filters['status'];
+		}
+
+		if ( ! empty( $filters['job_type'] ) ) {
+			$where[]  = 'j.job_type = %s';
+			$values[] = (string) $filters['job_type'];
+		}
+
+		if ( ! empty( $filters['reference_type'] ) ) {
+			$where[]  = 'j.reference_type = %s';
+			$values[] = (string) $filters['reference_type'];
+		}
+
+		if ( ! empty( $filters['reference_id'] ) ) {
+			$where[]  = 'j.reference_id = %d';
+			$values[] = absint( $filters['reference_id'] );
+		}
+
+		if ( ! empty( $filters['chart_id'] ) ) {
+			$where[]  = 'j.chart_id = %d';
+			$values[] = absint( $filters['chart_id'] );
+		}
+
+		if ( ! empty( $filters['country'] ) ) {
+			$where[]  = 'j.country = %s';
+			$values[] = (string) $filters['country'];
+		}
+
+		if ( ! empty( $filters['week_date'] ) ) {
+			$where[]  = 'j.week_date = %s';
+			$values[] = (string) $filters['week_date'];
+		}
+
+		$sql = "SELECT j.*, c.name AS chart_name, u.file_name AS upload_file_name, u.file_status AS upload_status
+			FROM {$jobs_table} j
+			LEFT JOIN {$charts_table} c ON c.id = j.chart_id
+			LEFT JOIN {$uploads_table} u ON u.id = j.reference_id AND j.reference_type = 'upload'
+			WHERE " . implode( ' AND ', $where ) . '
+			ORDER BY j.id DESC';
+
+		if ( ! empty( $filters['limit'] ) ) {
+			$sql .= ' LIMIT ' . absint( $filters['limit'] );
+		}
+
+		if ( ! empty( $values ) ) {
+			$sql = $wpdb->prepare( $sql, $values ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+		}
+
+		return $wpdb->get_results( $sql, ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+	}
+
+	/**
+	 * Find a queued or running job by lock key.
+	 *
+	 * @param string $lock_key Lock key.
+	 * @param int    $exclude_id Optional job id to exclude.
+	 * @return array|null
+	 */
+	public static function find_active_job_by_lock_key( $lock_key, $exclude_id = 0 ) {
+		global $wpdb;
+
+		if ( '' === $lock_key ) {
+			return null;
+		}
+
+		$table = self::table( 'jobs' );
+		$sql   = "SELECT * FROM {$table} WHERE lock_key = %s AND status IN ('queued','running')";
+		$args  = array( (string) $lock_key );
+
+		if ( $exclude_id > 0 ) {
+			$sql   .= ' AND id != %d';
+			$args[] = absint( $exclude_id );
+		}
+
+		$sql .= ' ORDER BY id DESC LIMIT 1';
+		$row  = $wpdb->get_row( $wpdb->prepare( $sql, $args ), ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+
+		return $row ? $row : null;
+	}
+
+	/**
+	 * Aggregate job metrics for observability.
+	 *
+	 * @return array
+	 */
+	public static function job_metrics() {
+		global $wpdb;
+
+		$table = self::table( 'jobs' );
+		$avg   = $wpdb->get_var( "SELECT AVG(TIMESTAMPDIFF(SECOND, started_at, completed_at)) FROM {$table} WHERE status = 'completed' AND started_at IS NOT NULL AND completed_at IS NOT NULL" ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		$types = $wpdb->get_results( "SELECT job_type, COUNT(*) AS total_jobs, SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed_jobs, AVG(CASE WHEN started_at IS NOT NULL AND completed_at IS NOT NULL THEN TIMESTAMPDIFF(SECOND, started_at, completed_at) END) AS avg_duration, SUM(CASE WHEN attempts > 1 THEN 1 ELSE 0 END) AS retried_jobs FROM {$table} GROUP BY job_type ORDER BY total_jobs DESC", ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		$backlog = $wpdb->get_results( "SELECT DATE(created_at) AS bucket_date, COUNT(*) AS total_jobs, SUM(CASE WHEN status IN ('queued','running') THEN 1 ELSE 0 END) AS backlog_jobs FROM {$table} GROUP BY DATE(created_at) ORDER BY bucket_date DESC LIMIT 7", ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+
+		return array(
+			'average_duration' => $avg ? round( (float) $avg, 1 ) : 0,
+			'recent_failures'  => self::get_jobs(
+				array(
+					'status' => 'failed',
+					'limit'  => 5,
+				)
+			),
+			'by_type'          => is_array( $types ) ? $types : array(),
+			'backlog'          => is_array( $backlog ) ? array_reverse( $backlog ) : array(),
+		);
+	}
+
+	/**
 	 * Count rows in a table.
 	 *
 	 * @param string $table_key Table key.
@@ -674,6 +866,9 @@ class AMC_DB {
 			'methodology_text' => '',
 			'language'         => '',
 			'date_format'      => '',
+			'alert_email'      => '',
+			'alert_webhook_url'=> '',
+			'alert_types_enabled' => '',
 		);
 
 		global $wpdb;

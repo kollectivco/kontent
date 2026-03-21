@@ -16,6 +16,9 @@ class AMC_Routing {
 	public static function register_routes() {
 		add_rewrite_rule( '^' . AMC_ROUTE_BASE . '/?$', 'index.php?amc_route=home', 'top' );
 		add_rewrite_rule( '^' . AMC_ROUTE_BASE . '/charts/?$', 'index.php?amc_route=charts', 'top' );
+		add_rewrite_rule( '^' . AMC_ROUTE_BASE . '/tracks/?$', 'index.php?amc_route=tracks', 'top' );
+		add_rewrite_rule( '^' . AMC_ROUTE_BASE . '/artists/?$', 'index.php?amc_route=artists', 'top' );
+		add_rewrite_rule( '^' . AMC_ROUTE_BASE . '/about/?$', 'index.php?amc_route=about', 'top' );
 		add_rewrite_rule( '^' . AMC_ROUTE_BASE . '/charts/([^/]+)/?$', 'index.php?amc_route=chart&amc_chart=$matches[1]', 'top' );
 		add_rewrite_rule( '^' . AMC_ROUTE_BASE . '/track/([^/]+)/?$', 'index.php?amc_route=track&amc_track=$matches[1]', 'top' );
 		add_rewrite_rule( '^' . AMC_ROUTE_BASE . '/artist/([^/]+)/?$', 'index.php?amc_route=artist&amc_artist=$matches[1]', 'top' );
@@ -61,6 +64,12 @@ class AMC_Routing {
 				return array( 'title' => 'Kontentainment Charts' );
 			case 'charts':
 				return array( 'title' => 'Charts Index' );
+			case 'tracks':
+				return array( 'title' => 'All Tracks' );
+			case 'artists':
+				return array( 'title' => 'All Artists' );
+			case 'about':
+				return array( 'title' => 'About Charts' );
 			case 'chart':
 				$chart = AMC_Data::get_chart( get_query_var( 'amc_chart' ) );
 				return array( 'title' => $chart ? $chart['title'] : 'Chart' );
@@ -97,6 +106,12 @@ class AMC_Routing {
 				return AMC_PLUGIN_DIR . 'templates/home.php';
 			case 'charts':
 				return AMC_PLUGIN_DIR . 'templates/charts-index.php';
+			case 'tracks':
+				return AMC_PLUGIN_DIR . 'templates/tracks-index.php';
+			case 'artists':
+				return AMC_PLUGIN_DIR . 'templates/artists-index.php';
+			case 'about':
+				return AMC_PLUGIN_DIR . 'templates/about.php';
 			case 'chart':
 				return AMC_PLUGIN_DIR . 'templates/chart-page.php';
 			case 'track':

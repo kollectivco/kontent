@@ -105,6 +105,10 @@ html[data-amc-theme="light"] body.amc-dashboard-page {
 	padding: 22px;
 }
 
+.amc-custom-dashboard .amc-admin-grid--bento {
+	align-items: start;
+}
+
 .amc-admin-topbar--dashboard {
 	margin-bottom: 22px;
 }

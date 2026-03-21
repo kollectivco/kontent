@@ -13,6 +13,7 @@ $chart_state     = AMC_Data::chart_public_state( $chart_slug );
 $amc_page_title  = $chart ? $chart['title'] : 'Chart';
 $amc_body_class  = 'amc-chart-page';
 $summary         = $chart && ! empty( $chart['summary'] ) ? $chart['summary'] : array();
+$history         = $chart ? AMC_Data::get_chart_history( $chart['slug'], 6 ) : array();
 
 include AMC_PLUGIN_DIR . 'templates/parts/document-start.php';
 include AMC_PLUGIN_DIR . 'templates/parts/site-header.php';
@@ -84,6 +85,38 @@ include AMC_PLUGIN_DIR . 'templates/parts/site-header.php';
 			$entries = $chart['entries'];
 			include AMC_PLUGIN_DIR . 'templates/parts/chart-table.php';
 			?>
+
+			<section class="amc-section">
+				<div class="amc-container amc-split">
+					<div class="amc-panel">
+						<div class="amc-panel__header">
+							<p class="amc-section-label">Chart History</p>
+							<h2>Recent week snapshots</h2>
+						</div>
+						<?php if ( $history ) : ?>
+							<?php foreach ( $history as $week ) : ?>
+								<div class="amc-mini-row">
+									<div>
+										<strong><?php echo esc_html( $week['week_date'] ); ?></strong>
+										<span><?php echo esc_html( $week['country'] . ' • ' . $week['status'] ); ?></span>
+									</div>
+									<em><?php echo esc_html( $week['entry_count'] ); ?> entries</em>
+								</div>
+							<?php endforeach; ?>
+						<?php else : ?>
+							<p>No week history exists yet for this chart.</p>
+						<?php endif; ?>
+					</div>
+					<div class="amc-panel">
+						<div class="amc-panel__header">
+							<p class="amc-section-label">About This Chart</p>
+							<h2>Methodology context</h2>
+						</div>
+						<p>This chart becomes public only after a real draft week has been generated and reviewed through the publishing workflow.</p>
+						<a class="amc-text-link" href="<?php echo esc_url( AMC_Data::route_url( 'about' ) ); ?>">Learn how chart weeks are published</a>
+					</div>
+				</div>
+			</section>
 
 			<?php
 			$lists = array_slice( AMC_Data::get_more_charts( $chart['slug'] ), 0, 3 );

@@ -39,6 +39,7 @@ class AMC_Admin_Data {
 	public static function wp_admin_pages() {
 		return array(
 			'overview'       => array( 'menu_slug' => 'kontentainment-charts', 'title' => 'Overview' ),
+			'notifications'  => array( 'menu_slug' => 'kontentainment-charts-notifications', 'title' => 'Notifications' ),
 			'settings'       => array( 'menu_slug' => 'kontentainment-charts-settings', 'title' => 'Settings' ),
 			'tools'          => array( 'menu_slug' => 'kontentainment-charts-tools', 'title' => 'Tools' ),
 			'logs'           => array( 'menu_slug' => 'kontentainment-charts-logs', 'title' => 'Logs' ),
@@ -64,7 +65,9 @@ class AMC_Admin_Data {
 			'cleaning'       => array( 'title' => 'Matching and Cleaning', 'path' => 'cleaning' ),
 			'scoring'        => array( 'title' => 'Scoring Rules', 'path' => 'scoring' ),
 			'publishing'     => array( 'title' => 'Publishing', 'path' => 'publishing' ),
+			'jobs'           => array( 'title' => 'Jobs and Queue', 'path' => 'jobs' ),
 			'archives'       => array( 'title' => 'Archive Management', 'path' => 'archives' ),
+			'notifications'  => array( 'title' => 'Notifications', 'path' => 'notifications' ),
 			'users'          => array( 'title' => 'Users and Roles', 'path' => 'users' ),
 			'settings'       => array( 'title' => 'Settings', 'path' => 'settings' ),
 		);
@@ -268,13 +271,20 @@ class AMC_Admin_Data {
 		$uploads            = self::uploads();
 		$matching_candidates= self::matching_candidates();
 		$weeks              = AMC_DB::get_chart_weeks();
+		$jobs               = AMC_DB::jobs_summary();
+		$job_metrics        = AMC_DB::job_metrics();
 		$ready_to_generate  = 0;
 		$draft_ready        = 0;
 		$live_weeks         = array();
+		$ready_to_create    = 0;
 
 		foreach ( $uploads as $upload ) {
 			if ( in_array( $upload['raw_status'], array( 'matched', 'generated', 'published' ), true ) && empty( $upload['is_dry_run'] ) ) {
 				++$ready_to_generate;
+			}
+
+			if ( ! empty( $upload['diagnostic_summary']['auto_created_rows'] ) ) {
+				$ready_to_create += (int) $upload['diagnostic_summary']['auto_created_rows'];
 			}
 		}
 
@@ -307,9 +317,200 @@ class AMC_Admin_Data {
 		return array(
 			'latest_uploads'      => array_slice( $uploads, 0, 5 ),
 			'pending_review'      => $pending_review,
+			'ready_to_create'     => $ready_to_create,
 			'charts_ready'        => $ready_to_generate,
 			'draft_ready'         => $draft_ready,
 			'live_weeks'          => array_slice( $live_weeks, 0, 6 ),
+			'jobs'                => $jobs,
+			'job_average_duration'=> $job_metrics['average_duration'],
+		);
+	}
+
+	/**
+	 * Operator notifications.
+	 *
+	 * @return array
+	 */
+	public static function notifications() {
+		$notifications = AMC_Ingestion::notifications();
+		$notifications = is_array( $notifications ) ? array_reverse( $notifications ) : array();
+
+		return array_values(
+			array_slice(
+				array_filter(
+					$notifications,
+					function ( $notification ) {
+						return empty( $notification['is_dismissed'] );
+					}
+				),
+				0,
+				8
+			)
+		);
+	}
+
+	/**
+	 * Full notification center data with filters.
+	 *
+	 * @param array $filters Filters.
+	 * @return array
+	 */
+	public static function notification_center( $filters = array() ) {
+		$defaults      = array(
+			'severity' => '',
+			'status'   => '',
+			'date'     => '',
+		);
+		$filters       = wp_parse_args( $filters, $defaults );
+		$notifications = AMC_Ingestion::notifications();
+		$notifications = is_array( $notifications ) ? array_reverse( $notifications ) : array();
+
+		$rows = array_values(
+			array_filter(
+				$notifications,
+				function ( $notification ) use ( $filters ) {
+					if ( ! empty( $filters['severity'] ) && ( empty( $notification['type'] ) || $notification['type'] !== $filters['severity'] ) ) {
+						return false;
+					}
+
+					if ( ! empty( $filters['status'] ) ) {
+						if ( 'unread' === $filters['status'] && ! empty( $notification['is_read'] ) ) {
+							return false;
+						}
+
+						if ( 'read' === $filters['status'] && empty( $notification['is_read'] ) ) {
+							return false;
+						}
+
+						if ( 'dismissed' === $filters['status'] && empty( $notification['is_dismissed'] ) ) {
+							return false;
+						}
+					}
+
+					if ( ! empty( $filters['date'] ) && ( empty( $notification['created_at'] ) || 0 !== strpos( $notification['created_at'], $filters['date'] ) ) ) {
+						return false;
+					}
+
+					return true;
+				}
+			)
+		);
+
+		return array_map(
+			function ( $notification ) {
+				$context = ! empty( $notification['context'] ) && is_array( $notification['context'] ) ? $notification['context'] : array();
+				return array(
+					'id'         => ! empty( $notification['id'] ) ? $notification['id'] : '',
+					'severity'   => ! empty( $notification['type'] ) ? ucfirst( $notification['type'] ) : 'Info',
+					'message'    => ! empty( $notification['message'] ) ? $notification['message'] : '',
+					'status'     => ! empty( $notification['is_dismissed'] ) ? 'Dismissed' : ( ! empty( $notification['is_read'] ) ? 'Read' : 'Unread' ),
+					'created_at' => ! empty( $notification['created_at'] ) ? $notification['created_at'] : '',
+					'context'    => $context,
+				);
+			},
+			$rows
+		);
+	}
+
+	/**
+	 * Notification filters from request.
+	 *
+	 * @return array
+	 */
+	public static function notification_filters_from_request() {
+		return array(
+			'severity' => isset( $_GET['notice_severity'] ) ? sanitize_key( wp_unslash( $_GET['notice_severity'] ) ) : '',
+			'status'   => isset( $_GET['notice_status'] ) ? sanitize_key( wp_unslash( $_GET['notice_status'] ) ) : '',
+			'date'     => isset( $_GET['notice_date'] ) ? sanitize_text_field( wp_unslash( $_GET['notice_date'] ) ) : '',
+		);
+	}
+
+	/**
+	 * Queue jobs for dashboard and admin views.
+	 *
+	 * @param array $filters Optional filters.
+	 * @return array
+	 */
+	public static function jobs( $filters = array() ) {
+		$rows = AMC_DB::get_jobs( $filters );
+
+		return array_map(
+			function ( $row ) {
+				$duration = '';
+				if ( ! empty( $row['started_at'] ) && ! empty( $row['completed_at'] ) ) {
+					$duration = max( 0, strtotime( $row['completed_at'] ) - strtotime( $row['started_at'] ) ) . 's';
+				}
+
+				$related = array();
+				if ( ! empty( $row['reference_type'] ) ) {
+					$related[] = ucfirst( $row['reference_type'] ) . ' #' . (int) $row['reference_id'];
+				}
+				if ( ! empty( $row['chart_name'] ) ) {
+					$related[] = $row['chart_name'];
+				}
+				if ( ! empty( $row['country'] ) ) {
+					$related[] = $row['country'];
+				}
+				if ( ! empty( $row['week_date'] ) ) {
+					$related[] = $row['week_date'];
+				}
+
+				return array(
+					'id'            => (int) $row['id'],
+					'job_type'      => ucwords( str_replace( '_', ' ', $row['job_type'] ) ),
+					'raw_job_type'  => $row['job_type'],
+					'related'       => ! empty( $related ) ? implode( ' / ', $related ) : 'General operation',
+					'state'         => ucfirst( $row['status'] ),
+					'raw_state'     => $row['status'],
+					'created_time'  => $row['created_at'],
+					'started_time'  => ! empty( $row['started_at'] ) ? $row['started_at'] : 'Not started',
+					'finished_time' => ! empty( $row['completed_at'] ) ? $row['completed_at'] : 'Not finished',
+					'duration'      => $duration ? $duration : 'Pending',
+					'attempts'      => (int) $row['attempts'],
+					'max_attempts'  => ! empty( $row['max_attempts'] ) ? (int) $row['max_attempts'] : 0,
+					'next_retry_at' => ! empty( $row['next_retry_at'] ) ? $row['next_retry_at'] : '',
+					'last_error_step' => ! empty( $row['last_error_step'] ) ? ucwords( str_replace( '_', ' ', $row['last_error_step'] ) ) : '',
+					'failure_reason'=> ! empty( $row['error_message'] ) ? $row['error_message'] : '',
+					'trigger_mode'  => ! empty( $row['trigger_mode'] ) ? ucfirst( $row['trigger_mode'] ) : 'Manual',
+					'chart_name'    => ! empty( $row['chart_name'] ) ? $row['chart_name'] : '',
+					'country'       => ! empty( $row['country'] ) ? $row['country'] : '',
+					'week_date'     => ! empty( $row['week_date'] ) ? $row['week_date'] : '',
+					'reference_id'  => (int) $row['reference_id'],
+					'reference_type'=> ! empty( $row['reference_type'] ) ? $row['reference_type'] : '',
+				);
+			},
+			$rows
+		);
+	}
+
+	/**
+	 * Job queue filters from request.
+	 *
+	 * @return array
+	 */
+	public static function job_filters_from_request() {
+		return array(
+			'status'   => isset( $_GET['job_status'] ) ? sanitize_key( wp_unslash( $_GET['job_status'] ) ) : '',
+			'job_type' => isset( $_GET['job_type'] ) ? sanitize_key( wp_unslash( $_GET['job_type'] ) ) : '',
+			'chart_id' => isset( $_GET['job_chart_id'] ) ? absint( wp_unslash( $_GET['job_chart_id'] ) ) : 0,
+			'country'  => isset( $_GET['job_country'] ) ? sanitize_text_field( wp_unslash( $_GET['job_country'] ) ) : '',
+			'week_date'=> isset( $_GET['job_week_date'] ) ? sanitize_text_field( wp_unslash( $_GET['job_week_date'] ) ) : '',
+		);
+	}
+
+	/**
+	 * Dashboard job observability snapshot.
+	 *
+	 * @return array
+	 */
+	public static function job_observability() {
+		$metrics = AMC_DB::job_metrics();
+		return array(
+			'summary'         => AMC_DB::jobs_summary(),
+			'average_duration'=> $metrics['average_duration'],
+			'recent_failures' => array_slice( self::jobs( array( 'status' => 'failed', 'limit' => 5 ) ), 0, 5 ),
+			'by_type'         => ! empty( $metrics['by_type'] ) ? $metrics['by_type'] : array(),
+			'backlog'         => ! empty( $metrics['backlog'] ) ? $metrics['backlog'] : array(),
 		);
 	}
 
@@ -382,7 +583,7 @@ class AMC_Admin_Data {
 			$valid_rows   += ! empty( $diag['valid_rows'] ) ? (int) $diag['valid_rows'] : 0;
 			$matched_rows += ! empty( $diag['matched_rows'] ) ? (int) $diag['matched_rows'] : 0;
 			$rejected_rows+= ! empty( $diag['rejected_rows'] ) ? (int) $diag['rejected_rows'] : 0;
-			$review_rows  += ! empty( $diag['review_needed_rows'] ) ? (int) $diag['review_needed_rows'] : 0;
+			$review_rows  += ! empty( $diag['review_needed_rows'] ) ? (int) $diag['review_needed_rows'] : ( ! empty( $diag['review_needed'] ) ? (int) $diag['review_needed'] : 0 );
 		}
 
 		$safety = array(
@@ -681,15 +882,34 @@ class AMC_Admin_Data {
 				$candidate  = trim( ( ! empty( $source_row['track_title'] ) ? $source_row['track_title'] : ( ! empty( $source_row['artist_name'] ) ? $source_row['artist_name'] : 'Unknown candidate' ) ) . ' / ' . ( ! empty( $source_row['artist_names'] ) ? $source_row['artist_names'] : '' ), ' /' );
 				$upload     = AMC_DB::get_row( 'source_uploads', (int) $row['upload_id'] );
 				$chart      = ( $upload && ! empty( $upload['target_chart_id'] ) ) ? AMC_DB::get_row( 'charts', (int) $upload['target_chart_id'] ) : null;
+				$row_type   = ! empty( $row['row_type'] ) ? $row['row_type'] : 'review needed';
+				$resolution = ! empty( $source_row['match_resolution'] ) ? $source_row['match_resolution'] : '';
+				$auto_type  = ! empty( $source_row['auto_created_entity_type'] ) ? ucfirst( $source_row['auto_created_entity_type'] ) : '';
+				$confidence = '';
+
+				if ( 'auto_created' === $row['status'] ) {
+					$confidence = 'Created automatically';
+				} elseif ( ! empty( $row['confidence_label'] ) ) {
+					$confidence = ( $row['confidence'] > 0 ? rtrim( rtrim( number_format( (float) $row['confidence'], 2, '.', '' ), '0' ), '.' ) . '% / ' : '' ) . ucwords( str_replace( '-', ' ', $row['confidence_label'] ) );
+				} elseif ( (float) $row['confidence'] > 0 ) {
+					$confidence = rtrim( rtrim( number_format( (float) $row['confidence'], 2, '.', '' ), '0' ), '.' ) . '%';
+				} else {
+					$confidence = 'Needs operator review';
+				}
 
 				return array(
 					'id'         => (int) $row['id'],
 					'candidate'  => $candidate,
 					'type'       => ucfirst( $row['entity_type'] ),
-					'confidence' => $row['confidence'] . '%' . ( ! empty( $row['notes'] ) ? ' / ' . $row['notes'] : '' ),
+					'row_type'   => ucwords( $row_type ),
+					'confidence' => $confidence,
+					'basis'      => ! empty( $row['match_basis'] ) ? $row['match_basis'] : 'No clear basis recorded',
 					'sources'    => $upload ? trim( AMC_Ingestion::platform_label( ! empty( $upload['source_platform'] ) ? $upload['source_platform'] : $upload['source_name'] ) . ' / ' . $upload['country'] . ' / ' . $upload['chart_week'] . ( $chart ? ' / ' . $chart['name'] : '' ), ' /' ) : 'Unknown source',
 					'status'     => ucwords( str_replace( '_', ' ', $row['status'] ) ),
 					'raw_status' => $row['status'],
+					'action_hint'=> ! empty( $row['action_hint'] ) ? $row['action_hint'] : 'Review this row before generation.',
+					'resolution' => $resolution,
+					'create_mode'=> 'auto_created' === $resolution ? trim( $auto_type . ' auto-created' ) : ( 'manual_override' === $resolution ? 'Manual override applied' : ( 'matched_existing' === $resolution ? 'Matched to existing entity' : 'Awaiting decision' ) ),
 					'queue'      => $row,
 				);
 			},
@@ -849,19 +1069,29 @@ class AMC_Admin_Data {
 		return array_map(
 			function ( $row ) {
 				$chart = ! empty( $row['target_chart_id'] ) ? AMC_DB::get_row( 'charts', (int) $row['target_chart_id'] ) : null;
+				$context = ! empty( $row['context'] ) ? json_decode( $row['context'], true ) : array();
+				$event   = $row['action'] . ': ' . $row['message'];
+				if ( is_array( $context ) ) {
+					if ( ! empty( $context['job_id'] ) ) {
+						$event .= ' (Job #' . (int) $context['job_id'] . ')';
+					}
+					if ( ! empty( $context['chart_week_id'] ) ) {
+						$event .= ' (Week #' . (int) $context['chart_week_id'] . ')';
+					}
+				}
 				return array(
 					'id'     => (int) $row['id'],
 					'upload_id' => (int) $row['upload_id'],
 					'source_row_id' => (int) $row['source_row_id'],
 					'time'   => $row['created_at'],
-					'event'  => $row['action'] . ': ' . $row['message'],
+					'event'  => $event,
 					'action' => $row['action'],
 					'level'  => $row['level'],
 					'source' => ! empty( $row['source_platform'] ) ? AMC_Ingestion::platform_label( $row['source_platform'] ) : 'System',
 					'country' => ! empty( $row['country'] ) ? $row['country'] : 'Global',
 					'chart'  => $chart ? $chart['name'] : 'N/A',
 					'upload_status' => ! empty( $row['file_status'] ) ? ucfirst( $row['file_status'] ) : 'N/A',
-					'context' => ! empty( $row['context'] ) ? json_decode( $row['context'], true ) : array(),
+					'context' => $context,
 					'actor'  => 'System',
 					'status' => ucfirst( $row['level'] ),
 				);

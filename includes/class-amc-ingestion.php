@@ -8,6 +8,8 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 class AMC_Ingestion {
+	const CRON_HOOK = 'amc_process_jobs';
+
 	/**
 	 * Ensure default scoring rules exist.
 	 *
@@ -134,6 +136,7 @@ class AMC_Ingestion {
 			if ( ! $override_duplicate ) {
 				$message = sprintf( 'Likely duplicate upload detected against upload #%d for the same source, chart, country, and week. Re-upload with duplicate override if you want to process it anyway.', (int) $duplicate['id'] );
 				self::fail_upload( $upload_id, $message, 'duplicate-detection' );
+				self::notify( 'warning', $message, array( 'upload_id' => $upload_id ) );
 				return array(
 					'success'  => false,
 					'type'     => 'warning',
@@ -173,15 +176,356 @@ class AMC_Ingestion {
 	}
 
 	/**
+	 * Register cron hooks.
+	 *
+	 * @return void
+	 */
+	public static function boot() {
+		add_action( self::CRON_HOOK, array( __CLASS__, 'process_queued_jobs' ) );
+	}
+
+	/**
+	 * Queue a background-safe job.
+	 *
+	 * @param string $job_type Job type.
+	 * @param array  $args Payload.
+	 * @return int
+	 */
+	public static function enqueue_job( $job_type, $args = array() ) {
+		$lock_key = self::build_job_lock_key( $job_type, $args );
+		$existing = AMC_DB::find_active_job_by_lock_key( $lock_key );
+		$policy   = self::retry_policy_for_job_type( $job_type );
+
+		if ( $existing ) {
+			self::notify(
+				'warning',
+				'An equivalent job is already queued or running, so a duplicate job was not added.',
+				array(
+					'job_id'   => (int) $existing['id'],
+					'job_type' => $job_type,
+					'lock_key' => $lock_key,
+				)
+			);
+			return (int) $existing['id'];
+		}
+
+		$job_id = AMC_DB::save_row(
+			'jobs',
+			array(
+				'job_type'       => sanitize_key( $job_type ),
+				'job_group'      => ! empty( $args['job_group'] ) ? sanitize_key( $args['job_group'] ) : 'operations',
+				'status'         => 'queued',
+				'lock_key'       => $lock_key,
+				'trigger_mode'   => ! empty( $args['trigger_mode'] ) ? sanitize_key( $args['trigger_mode'] ) : 'queued',
+				'initiated_by'   => get_current_user_id(),
+				'reference_type' => ! empty( $args['reference_type'] ) ? sanitize_key( $args['reference_type'] ) : '',
+				'reference_id'   => ! empty( $args['reference_id'] ) ? absint( $args['reference_id'] ) : 0,
+				'chart_id'       => ! empty( $args['chart_id'] ) ? absint( $args['chart_id'] ) : 0,
+				'country'        => ! empty( $args['country'] ) ? self::normalize_country( $args['country'] ) : '',
+				'week_date'      => ! empty( $args['week_date'] ) ? sanitize_text_field( $args['week_date'] ) : null,
+				'attempts'       => 0,
+				'max_attempts'   => ! empty( $args['max_attempts'] ) ? absint( $args['max_attempts'] ) : $policy['max_attempts'],
+				'retry_delay_seconds' => ! empty( $args['retry_delay_seconds'] ) ? absint( $args['retry_delay_seconds'] ) : $policy['retry_delay_seconds'],
+				'next_retry_at'  => null,
+				'last_error_step'=> '',
+				'payload'        => wp_json_encode( $args ),
+				'result_data'    => '',
+				'error_message'  => '',
+			)
+		);
+
+		if ( ! wp_next_scheduled( self::CRON_HOOK ) ) {
+			wp_schedule_single_event( time() + 60, self::CRON_HOOK );
+		}
+
+		return $job_id;
+	}
+
+	/**
+	 * Process queued jobs.
+	 *
+	 * @return void
+	 */
+	public static function process_queued_jobs() {
+		$jobs = array_filter(
+			AMC_DB::get_jobs(
+				array(
+					'status' => 'queued',
+					'limit'  => 10,
+				)
+			),
+			function ( $job ) {
+				return empty( $job['next_retry_at'] ) || strtotime( $job['next_retry_at'] ) <= current_time( 'timestamp' );
+			}
+		);
+
+		foreach ( $jobs as $job ) {
+			self::run_job( (int) $job['id'], 'cron' );
+		}
+	}
+
+	/**
+	 * Execute one queued job.
+	 *
+	 * @param int $job_id Job id.
+	 * @return array
+	 */
+	public static function run_job( $job_id, $execution_mode = 'manual' ) {
+		$job = AMC_DB::get_row( 'jobs', $job_id );
+
+		if ( ! $job || ! in_array( $job['status'], array( 'queued', 'failed' ), true ) ) {
+			return array( 'success' => false, 'message' => 'Job is not available to run.' );
+		}
+
+		if ( ! empty( $job['lock_key'] ) ) {
+			$active = AMC_DB::find_active_job_by_lock_key( $job['lock_key'], $job_id );
+			if ( $active ) {
+				return array( 'success' => false, 'message' => 'Another equivalent job is already queued or running.' );
+			}
+		}
+
+		$lock_acquired = self::acquire_lock( 'job:' . $job_id, 10 * MINUTE_IN_SECONDS );
+
+		if ( ! $lock_acquired ) {
+			return array( 'success' => false, 'message' => 'This job is already being processed.' );
+		}
+
+		$payload = ! empty( $job['payload'] ) ? json_decode( $job['payload'], true ) : array();
+		$payload = is_array( $payload ) ? $payload : array();
+
+		AMC_DB::save_row(
+			'jobs',
+			array(
+				'status'     => 'running',
+				'started_at' => current_time( 'mysql' ),
+				'attempts'   => (int) $job['attempts'] + 1,
+				'trigger_mode' => sanitize_key( $execution_mode ),
+				'next_retry_at' => null,
+				'last_error_step' => '',
+				'error_message' => '',
+			),
+			$job_id
+		);
+
+		$result = self::dispatch_job( $job['job_type'], $payload );
+
+		$job_update = array(
+			'status'          => ! empty( $result['success'] ) ? 'completed' : 'failed',
+			'result_data'     => wp_json_encode( $result ),
+			'error_message'   => ! empty( $result['success'] ) ? '' : ( ! empty( $result['message'] ) ? $result['message'] : 'Job failed.' ),
+			'completed_at'    => current_time( 'mysql' ),
+			'last_error_step' => ! empty( $result['step'] ) ? sanitize_key( $result['step'] ) : '',
+		);
+
+		if ( empty( $result['success'] ) ) {
+			$attempts      = (int) $job['attempts'] + 1;
+			$max_attempts  = ! empty( $job['max_attempts'] ) ? (int) $job['max_attempts'] : 3;
+			$retry_delay   = ! empty( $job['retry_delay_seconds'] ) ? (int) $job['retry_delay_seconds'] : 300;
+			$should_retry  = $attempts < $max_attempts && self::job_type_retryable( $job['job_type'] );
+			$backoff_delay = $retry_delay * max( 1, $attempts );
+
+			if ( $should_retry ) {
+				$job_update['status']        = 'queued';
+				$job_update['next_retry_at'] = gmdate( 'Y-m-d H:i:s', current_time( 'timestamp', true ) + $backoff_delay );
+				self::notify( 'warning', 'A failed job was queued for automatic retry with backoff.', array( 'job_id' => $job_id, 'job_type' => $job['job_type'], 'next_retry_at' => $job_update['next_retry_at'] ) );
+			} else {
+				self::maybe_send_external_alert( 'repeated_failures', 'Repeated job failures reached the retry limit.', array( 'job_id' => $job_id, 'job_type' => $job['job_type'], 'attempts' => $attempts ) );
+			}
+		}
+
+		AMC_DB::save_row( 'jobs', $job_update, $job_id );
+
+		self::release_lock( 'job:' . $job_id );
+
+		self::log(
+			! empty( $payload['upload_id'] ) ? (int) $payload['upload_id'] : 0,
+			0,
+			'job_' . $job['job_type'],
+			! empty( $result['success'] ) ? 'info' : 'error',
+			! empty( $result['success'] ) ? 'Background job completed.' : 'Background job failed.',
+			array(
+				'job_id'   => $job_id,
+				'job_type' => $job['job_type'],
+				'payload'  => $payload,
+				'result'   => $result,
+			)
+		);
+
+		return $result;
+	}
+
+	/**
+	 * Cancel a queued job.
+	 *
+	 * @param int $job_id Job id.
+	 * @return array
+	 */
+	public static function cancel_job( $job_id ) {
+		$job = AMC_DB::get_row( 'jobs', $job_id );
+
+		if ( ! $job || 'queued' !== $job['status'] ) {
+			return array( 'success' => false, 'message' => 'Only queued jobs can be cancelled.' );
+		}
+
+		AMC_DB::save_row(
+			'jobs',
+			array(
+				'status'        => 'cancelled',
+				'error_message' => 'Cancelled by operator.',
+				'completed_at'  => current_time( 'mysql' ),
+			),
+			$job_id
+		);
+
+		self::notify( 'info', 'Queued job cancelled by operator.', array( 'job_id' => $job_id, 'job_type' => $job['job_type'] ) );
+		return array( 'success' => true, 'message' => 'Queued job cancelled.' );
+	}
+
+	/**
+	 * Retry a failed job.
+	 *
+	 * @param int $job_id Job id.
+	 * @return array
+	 */
+	public static function retry_job( $job_id ) {
+		$job = AMC_DB::get_row( 'jobs', $job_id );
+
+		if ( ! $job || 'failed' !== $job['status'] ) {
+			return array( 'success' => false, 'message' => 'Only failed jobs can be retried.' );
+		}
+
+		$max_attempts = ! empty( $job['max_attempts'] ) ? (int) $job['max_attempts'] : 3;
+		if ( (int) $job['attempts'] >= $max_attempts ) {
+			return array( 'success' => false, 'message' => 'This job has reached its retry limit.' );
+		}
+
+		if ( ! empty( $job['lock_key'] ) && AMC_DB::find_active_job_by_lock_key( $job['lock_key'], $job_id ) ) {
+			return array( 'success' => false, 'message' => 'A matching queued or running job already exists.' );
+		}
+
+		AMC_DB::save_row(
+			'jobs',
+			array(
+				'status'        => 'queued',
+				'started_at'    => null,
+				'completed_at'  => null,
+				'next_retry_at' => null,
+				'error_message' => '',
+				'result_data'   => '',
+			),
+			$job_id
+		);
+
+		self::notify( 'info', 'Failed job was queued for retry.', array( 'job_id' => $job_id, 'job_type' => $job['job_type'] ) );
+		return array( 'success' => true, 'message' => 'Failed job queued for retry.' );
+	}
+
+	/**
+	 * Rerun a completed job where safe.
+	 *
+	 * @param int $job_id Job id.
+	 * @return array
+	 */
+	public static function rerun_job( $job_id ) {
+		$job = AMC_DB::get_row( 'jobs', $job_id );
+
+		if ( ! $job || 'completed' !== $job['status'] ) {
+			return array( 'success' => false, 'message' => 'Only completed jobs can be rerun.' );
+		}
+
+		if ( ! self::job_type_rerunnable( $job['job_type'] ) ) {
+			return array( 'success' => false, 'message' => 'This completed job type is not safe to rerun.' );
+		}
+
+		$new_job_id = self::enqueue_job( $job['job_type'], self::job_payload_for_rerun( $job ) );
+		$result     = self::run_job( $new_job_id );
+
+		return array(
+			'success' => ! empty( $result['success'] ),
+			'message' => ! empty( $result['message'] ) ? $result['message'] : 'Completed job rerun finished.',
+			'result'  => $result,
+		);
+	}
+
+	/**
+	 * Run queued jobs immediately.
+	 *
+	 * @return array
+	 */
+	public static function run_queued_jobs_now() {
+		$jobs = AMC_DB::get_rows(
+			'jobs',
+			array(
+				'where'    => array( 'status' => 'queued' ),
+				'order_by' => 'id ASC',
+				'limit'    => 10,
+			)
+		);
+
+		foreach ( $jobs as $job ) {
+			self::run_job( (int) $job['id'], 'operator' );
+		}
+		return array( 'success' => true, 'message' => 'Queued jobs runner finished.' );
+	}
+
+	/**
+	 * Dispatch background-safe task.
+	 *
+	 * @param string $job_type Job type.
+	 * @param array  $payload Payload.
+	 * @return array
+	 */
+	private static function dispatch_job( $job_type, $payload ) {
+		switch ( $job_type ) {
+			case 'parse_upload':
+				return ! empty( $payload['upload_id'] ) ? self::parse_upload_service( (int) $payload['upload_id'] ) : array(
+					'success' => false,
+					'message' => 'Missing upload id for parse job.',
+				);
+			case 'rerun_matching':
+				if ( empty( $payload['upload_id'] ) ) {
+					return array( 'success' => false, 'message' => 'Missing upload id for matching job.' );
+				}
+				return self::rerun_matching_service( (int) $payload['upload_id'] );
+			case 'auto_create_processing':
+				if ( empty( $payload['upload_id'] ) ) {
+					return array( 'success' => false, 'message' => 'Missing upload id for auto-create processing job.' );
+				}
+				return self::auto_create_processing_service( (int) $payload['upload_id'] );
+			case 'generate_chart':
+				return self::generate_chart_week(
+					! empty( $payload['chart_id'] ) ? (int) $payload['chart_id'] : 0,
+					! empty( $payload['country'] ) ? $payload['country'] : '',
+					! empty( $payload['chart_date'] ) ? $payload['chart_date'] : '',
+					! empty( $payload['chart_type'] ) ? $payload['chart_type'] : ''
+				);
+			case 'publish_checks':
+				if ( empty( $payload['week_id'] ) ) {
+					return array( 'success' => false, 'message' => 'Missing chart week id for publish checks.' );
+				}
+				return self::publication_safety_check( (int) $payload['week_id'] );
+			case 'cleanup_diagnostics':
+				return self::run_cleanup_diagnostics();
+			default:
+				return array( 'success' => false, 'message' => 'Unknown job type.' );
+		}
+	}
+
+	/**
 	 * Parse an uploaded file.
 	 *
 	 * @param int $upload_id Upload id.
 	 * @return bool
 	 */
 	public static function parse_upload( $upload_id ) {
+		if ( ! self::acquire_operation_lock( 'upload-parse-' . absint( $upload_id ), 'Parsing is already running for this upload.' ) ) {
+			return false;
+		}
+
 		$upload = AMC_DB::get_row( 'source_uploads', $upload_id );
 
 		if ( ! $upload ) {
+			self::release_operation_lock( 'upload-parse-' . absint( $upload_id ) );
 			return false;
 		}
 
@@ -191,6 +535,7 @@ class AMC_Ingestion {
 
 		if ( ! in_array( $ext, array( 'csv', 'txt', 'tsv', 'xlsx', 'xls' ), true ) ) {
 			self::fail_upload( $upload_id, 'This file type is unsupported. Use CSV, TSV, TXT, XLSX, or XLS exports.', 'unsupported-file' );
+			self::release_operation_lock( 'upload-parse-' . absint( $upload_id ) );
 			return false;
 		}
 
@@ -198,11 +543,14 @@ class AMC_Ingestion {
 
 		if ( empty( $rows['success'] ) ) {
 			self::fail_upload( $upload_id, $rows['message'], ! empty( $rows['parser_name'] ) ? $rows['parser_name'] : 'read-failure' );
+			self::maybe_send_external_alert( 'parsing_failed', 'Upload parsing failed.', array( 'upload_id' => $upload_id, 'message' => $rows['message'] ) );
+			self::release_operation_lock( 'upload-parse-' . absint( $upload_id ) );
 			return false;
 		}
 
 		if ( empty( $rows['rows'] ) ) {
 			self::fail_upload( $upload_id, 'No parsable rows were found in the uploaded file.', 'empty-file' );
+			self::release_operation_lock( 'upload-parse-' . absint( $upload_id ) );
 			return false;
 		}
 
@@ -211,6 +559,7 @@ class AMC_Ingestion {
 
 		if ( empty( $parser_result['success'] ) ) {
 			self::fail_upload( $upload_id, $parser_result['message'], $parser_result['parser_name'] );
+			self::release_operation_lock( 'upload-parse-' . absint( $upload_id ) );
 			return false;
 		}
 
@@ -256,6 +605,9 @@ class AMC_Ingestion {
 					'matching_status'      => 'pending',
 					'match_confidence'     => 0,
 					'match_confidence_label' => '',
+					'match_resolution'     => '',
+					'auto_created_entity_type' => '',
+					'auto_created_entity_id'   => 0,
 				)
 			);
 
@@ -292,7 +644,12 @@ class AMC_Ingestion {
 		);
 
 		self::log( $upload_id, 0, 'parse', 'info', 'Upload parsed into normalized source rows.', array( 'row_count' => $count, 'invalid_rows' => $invalid, 'parser' => $parser_result['parser_name'] ) );
+		if ( $invalid > 0 ) {
+			self::notify( 'warning', 'Upload parsing completed with invalid or rejected rows.', array( 'upload_id' => $upload_id, 'invalid_rows' => $invalid ) );
+		}
+		self::maybe_send_threshold_alerts_for_upload( $upload_id );
 
+		self::release_operation_lock( 'upload-parse-' . absint( $upload_id ) );
 		return true;
 	}
 
@@ -304,6 +661,10 @@ class AMC_Ingestion {
 	 */
 	public static function run_matching( $upload_id ) {
 		global $wpdb;
+
+		if ( ! self::acquire_operation_lock( 'upload-match-' . absint( $upload_id ), 'Matching is already running for this upload.' ) ) {
+			return;
+		}
 
 		$rows = AMC_DB::get_rows(
 			'source_rows',
@@ -331,6 +692,7 @@ class AMC_Ingestion {
 						'matching_status'       => 'invalid',
 						'match_confidence'      => 0,
 						'match_confidence_label'=> 'invalid',
+						'match_resolution'      => 'invalid',
 					),
 					(int) $row['id']
 				);
@@ -357,6 +719,9 @@ class AMC_Ingestion {
 							'matching_status'        => 'matched',
 							'match_confidence'       => $confidence,
 							'match_confidence_label' => $level,
+							'match_resolution'       => 'matched_existing',
+							'auto_created_entity_type' => '',
+							'auto_created_entity_id'   => 0,
 						),
 						(int) $row['id']
 					);
@@ -370,21 +735,58 @@ class AMC_Ingestion {
 							'matching_status'        => 'review_needed',
 							'match_confidence'       => $confidence,
 							'match_confidence_label' => $level,
+							'match_resolution'       => 'review_needed',
 						),
 						(int) $row['id']
 					);
 					self::log( $upload_id, (int) $row['id'], 'matching_review', 'warning', 'Ambiguous match sent to review queue.', array( 'confidence' => $confidence, 'label' => $label ) );
 				}
 			} else {
-				AMC_DB::save_row(
-					'source_rows',
-					array(
-						'matching_status'        => 'pending',
-						'match_confidence'       => 0,
-						'match_confidence_label' => 'no match',
-					),
-					(int) $row['id']
-				);
+				$creation_result = self::auto_create_entity_from_row( $row, $type );
+
+				if ( ! empty( $creation_result['success'] ) ) {
+					$entity_id  = (int) $creation_result['entity_id'];
+					$entity_type = $creation_result['entity_type'];
+					$label      = $creation_result['label'];
+					$basis      = $creation_result['basis'];
+					$level      = 'ready to create';
+					$confidence = 100;
+					$status     = 'auto_created';
+
+					AMC_DB::save_row(
+						'source_rows',
+						array(
+							'matched_entity_type'      => $entity_type,
+							'matched_entity_id'        => $entity_id,
+							'matching_status'          => 'matched',
+							'match_confidence'         => $confidence,
+							'match_confidence_label'   => $level,
+							'match_resolution'         => 'auto_created',
+							'auto_created_entity_type' => $entity_type,
+							'auto_created_entity_id'   => $entity_id,
+						),
+						(int) $row['id']
+					);
+
+					self::log( $upload_id, (int) $row['id'], 'auto_create', 'info', 'Missing entity was created automatically from a valid unambiguous row.', $creation_result );
+					self::notify( 'info', 'Auto-create created a new entity from an upload row.', array( 'upload_id' => $upload_id, 'entity_type' => $entity_type, 'entity_id' => $entity_id ) );
+				} else {
+					AMC_DB::save_row(
+						'source_rows',
+						array(
+							'matching_status'        => 'review_needed',
+							'match_confidence'       => 0,
+							'match_confidence_label' => 'unmatched',
+							'match_resolution'       => 'review_needed',
+						),
+						(int) $row['id']
+					);
+
+					$status = 'review_needed';
+					$basis  = ! empty( $creation_result['reason'] ) ? $creation_result['reason'] : 'No safe match or auto-create path was available.';
+					$level  = 'unmatched';
+					self::log( $upload_id, (int) $row['id'], 'matching_review', 'warning', 'Row requires review before matching or creating an entity.', array( 'reason' => $basis ) );
+				}
 			}
 
 			AMC_DB::save_row(
@@ -396,7 +798,10 @@ class AMC_Ingestion {
 					'candidate_entity_id'  => $entity_id,
 					'candidate_label'      => $label,
 					'confidence'           => $confidence,
+					'confidence_label'     => $level,
 					'match_basis'          => $basis,
+					'row_type'             => self::queue_row_type( $status, $entity_id, $label, $basis ),
+					'action_hint'          => self::queue_action_hint( $status, $entity_id ),
 					'status'               => $status,
 					'override_entity_type' => '',
 					'override_entity_id'   => 0,
@@ -408,6 +813,15 @@ class AMC_Ingestion {
 		self::sync_upload_status_from_rows( $upload_id );
 		self::refresh_upload_diagnostics( $upload_id );
 		self::log( $upload_id, 0, 'match', 'info', 'Matching queue generated for upload.', array( 'rows' => count( $rows ) ) );
+		$upload_state = AMC_DB::get_row( 'source_uploads', $upload_id );
+		if ( $upload_state && ! empty( $upload_state['diagnostic_summary'] ) ) {
+			$diag = json_decode( $upload_state['diagnostic_summary'], true );
+			if ( is_array( $diag ) && ! empty( $diag['review_needed'] ) ) {
+				self::notify( 'warning', 'Matching review queue has items waiting for review.', array( 'upload_id' => $upload_id, 'review_needed' => (int) $diag['review_needed'] ) );
+			}
+		}
+		self::maybe_send_threshold_alerts_for_upload( $upload_id );
+		self::release_operation_lock( 'upload-match-' . absint( $upload_id ) );
 	}
 
 	/**
@@ -443,13 +857,15 @@ class AMC_Ingestion {
 
 		AMC_DB::save_row(
 			'matching_queue',
-			array(
-				'status'               => $new_status,
-				'override_entity_type' => 'override' === $decision ? $entity_type : $queue['override_entity_type'],
-				'override_entity_id'   => 'override' === $decision ? $entity_id : (int) $queue['override_entity_id'],
-				'notes'                => ! empty( $override['notes'] ) ? sanitize_text_field( $override['notes'] ) : $queue['notes'],
-			),
-			$queue_id
+				array(
+					'status'               => $new_status,
+					'override_entity_type' => 'override' === $decision ? $entity_type : $queue['override_entity_type'],
+					'override_entity_id'   => 'override' === $decision ? $entity_id : (int) $queue['override_entity_id'],
+					'row_type'             => 'override' === $decision ? 'review needed' : $queue['row_type'],
+					'action_hint'          => 'override' === $decision ? 'Operator selected a manual target record.' : $queue['action_hint'],
+					'notes'                => ! empty( $override['notes'] ) ? sanitize_text_field( $override['notes'] ) : $queue['notes'],
+				),
+				$queue_id
 		);
 
 		if ( in_array( $decision, array( 'approve', 'override' ), true ) ) {
@@ -459,6 +875,7 @@ class AMC_Ingestion {
 					'matched_entity_type' => $entity_type,
 					'matched_entity_id'   => $entity_id,
 					'matching_status'     => 'matched',
+					'match_resolution'    => 'override' === $decision ? 'manual_override' : 'matched_existing',
 				),
 				$source_row_id
 			);
@@ -469,6 +886,7 @@ class AMC_Ingestion {
 					'matched_entity_type' => '',
 					'matched_entity_id'   => 0,
 					'matching_status'     => 'rejected',
+					'match_resolution'    => 'rejected',
 				),
 				$source_row_id
 			);
@@ -488,6 +906,14 @@ class AMC_Ingestion {
 	 * @return array
 	 */
 	public static function reprocess_upload( $upload_id, $steps = array() ) {
+		$lock_name = 'upload-reprocess-' . absint( $upload_id );
+		if ( ! self::acquire_operation_lock( $lock_name, 'Reprocessing is already running for this upload.' ) ) {
+			return array(
+				'success' => false,
+				'message' => 'Reprocessing is already running for this upload.',
+			);
+		}
+
 		$defaults = array(
 			'parse' => true,
 			'match' => true,
@@ -497,6 +923,7 @@ class AMC_Ingestion {
 		if ( ! empty( $steps['parse'] ) ) {
 			$parsed = self::parse_upload( $upload_id );
 			if ( ! $parsed ) {
+				self::release_operation_lock( $lock_name );
 				return array(
 					'success' => false,
 					'message' => 'Upload reparse failed. Check parser diagnostics and invalid-row output.',
@@ -509,11 +936,91 @@ class AMC_Ingestion {
 		}
 
 		self::log( $upload_id, 0, 'reprocess', 'info', 'Upload reprocessing completed.', $steps );
+		self::release_operation_lock( $lock_name );
 
 		return array(
 			'success' => true,
 			'message' => 'Upload reprocessing completed successfully.',
 		);
+	}
+
+	/**
+	 * Cron-safe parse wrapper.
+	 *
+	 * @param int $upload_id Upload id.
+	 * @return array
+	 */
+	public static function parse_upload_service( $upload_id ) {
+		$success = self::parse_upload( $upload_id );
+		return array(
+			'success' => $success,
+			'step'    => 'parser',
+			'message' => $success ? 'Parse service completed.' : 'Parse service failed.',
+		);
+	}
+
+	/**
+	 * Cron-safe match wrapper.
+	 *
+	 * @param int $upload_id Upload id.
+	 * @return array
+	 */
+	public static function rerun_matching_service( $upload_id ) {
+		self::run_matching( $upload_id );
+		return array(
+			'success' => true,
+			'step'    => 'matching',
+			'message' => 'Matching service completed.',
+		);
+	}
+
+	/**
+	 * Cron-safe auto-create processing wrapper.
+	 *
+	 * @param int $upload_id Upload id.
+	 * @return array
+	 */
+	public static function auto_create_processing_service( $upload_id ) {
+		self::run_matching( $upload_id );
+		return array(
+			'success' => true,
+			'step'    => 'auto_create',
+			'message' => 'Auto-create processing service completed.',
+		);
+	}
+
+	/**
+	 * Cron-safe generation wrapper.
+	 *
+	 * @param int    $chart_id Chart id.
+	 * @param string $country Country.
+	 * @param string $chart_date Chart date.
+	 * @param string $chart_type Chart type.
+	 * @return array
+	 */
+	public static function generate_chart_service( $chart_id, $country, $chart_date, $chart_type ) {
+		$result = self::generate_chart_week( $chart_id, $country, $chart_date, $chart_type );
+		$result['step'] = 'generation';
+		return $result;
+	}
+
+	/**
+	 * Cron-safe publish-check wrapper.
+	 *
+	 * @param int $week_id Week id.
+	 * @return array
+	 */
+	public static function publish_checks_service( $week_id ) {
+		$result = self::publication_safety_check( $week_id );
+
+		if ( empty( $result['success'] ) ) {
+			$result['message'] = ! empty( $result['issues'] ) ? implode( ' ', $result['issues'] ) : 'Publish checks failed.';
+		} else {
+			$result['message'] = 'Publish checks passed.';
+		}
+		$result['step'] = 'publishing';
+
+		return $result;
 	}
 
 	/**
@@ -554,9 +1061,15 @@ class AMC_Ingestion {
 		$chart_date = sanitize_text_field( $chart_date );
 		$chart_type = self::normalize_chart_type( $chart_type );
 		$chart      = AMC_DB::get_row( 'charts', $chart_id );
+		$lock_name  = 'week-generate-' . $chart_id . '-' . md5( $country . '|' . $chart_date . '|' . $chart_type );
+
+		if ( ! self::acquire_operation_lock( $lock_name, 'Generation is already running for this chart, country, and week.' ) ) {
+			return array( 'success' => false, 'step' => 'generation', 'message' => 'Generation is already running for this chart, country, and week.' );
+		}
 
 		if ( ! $chart || ! $chart_type ) {
-			return array( 'success' => false, 'message' => 'Chart metadata is incomplete for generation.' );
+			self::release_operation_lock( $lock_name );
+			return array( 'success' => false, 'step' => 'generation', 'message' => 'Chart metadata is incomplete for generation.' );
 		}
 
 		$uploads_table = AMC_DB::table( 'source_uploads' );
@@ -583,7 +1096,8 @@ class AMC_Ingestion {
 
 		if ( empty( $rows ) ) {
 			self::log( 0, 0, 'generation', 'warning', 'No approved rows were available for generation.', array( 'chart_id' => $chart_id, 'country' => $country, 'chart_date' => $chart_date ) );
-			return array( 'success' => false, 'message' => 'No approved matched rows were found for the selected chart, country, and week.' );
+			self::release_operation_lock( $lock_name );
+			return array( 'success' => false, 'step' => 'generation', 'message' => 'No approved matched rows were found for the selected chart, country, and week.' );
 		}
 
 		$aggregate           = self::aggregate_generation_rows( $rows );
@@ -591,7 +1105,8 @@ class AMC_Ingestion {
 
 		if ( empty( $ranked ) ) {
 			self::log( 0, 0, 'generation', 'warning', 'Generation produced no eligible entries after methodology filters.', array( 'chart_id' => $chart_id, 'country' => $country, 'chart_date' => $chart_date ) );
-			return array( 'success' => false, 'message' => 'No eligible entries remained after applying scoring and eligibility rules.' );
+			self::release_operation_lock( $lock_name );
+			return array( 'success' => false, 'step' => 'generation', 'message' => 'No eligible entries remained after applying scoring and eligibility rules.' );
 		}
 
 		$previous_week       = self::get_previous_chart_week( $chart_id, $country, $chart_date );
@@ -686,9 +1201,13 @@ class AMC_Ingestion {
 				'previous_week'  => $previous_week ? (int) $previous_week['id'] : 0,
 			)
 		);
+		self::notify( 'info', 'Draft chart week generated and ready for review.', array( 'week_id' => $current_week_id, 'chart_id' => $chart_id, 'country' => $country, 'chart_date' => $chart_date ) );
+		self::maybe_send_external_alert( 'chart_ready_to_generate', 'A draft chart week is ready for operator review.', array( 'week_id' => $current_week_id, 'chart_id' => $chart_id, 'country' => $country, 'chart_date' => $chart_date ) );
+		self::release_operation_lock( $lock_name );
 
 		return array(
 			'success'      => true,
+			'step'         => 'generation',
 			'week_id'      => $current_week_id,
 			'entries'      => $comparison['entries'],
 			'dropped_out'  => $comparison['dropped_out'],
@@ -733,13 +1252,25 @@ class AMC_Ingestion {
 		if ( ! $week ) {
 			return array(
 				'success' => false,
+				'step'    => 'publishing',
 				'message' => 'Chart week could not be found.',
 			);
 		}
 
-		if ( 'published' === $week['status'] && ! $force ) {
+		$lock_name = 'week-publish-' . absint( $week_id );
+		if ( ! self::acquire_operation_lock( $lock_name, 'Publish flow is already running for this chart week.' ) ) {
 			return array(
 				'success' => false,
+				'step'    => 'publishing',
+				'message' => 'Publish flow is already running for this chart week.',
+			);
+		}
+
+		if ( 'published' === $week['status'] && ! $force ) {
+			self::release_operation_lock( $lock_name );
+			return array(
+				'success' => false,
+				'step'    => 'publishing',
 				'message' => 'This chart week is already live. Use republish only when you intentionally want to refresh the live timestamp.',
 			);
 		}
@@ -748,8 +1279,12 @@ class AMC_Ingestion {
 
 		if ( empty( $safety['success'] ) ) {
 			self::log( 0, 0, 'publishing_check', 'warning', 'Publishing safety check blocked publication.', array( 'chart_week_id' => (int) $week_id, 'issues' => $safety['issues'] ) );
+			self::notify( 'warning', 'Publishing was blocked by safety checks.', array( 'week_id' => $week_id, 'issues' => $safety['issues'] ) );
+			self::maybe_send_external_alert( 'publish_blocked', 'Publishing was blocked by safety checks.', array( 'week_id' => $week_id, 'issues' => $safety['issues'] ) );
+			self::release_operation_lock( $lock_name );
 			return array(
 				'success' => false,
+				'step'    => 'publishing',
 				'message' => implode( ' ', $safety['issues'] ),
 			);
 		}
@@ -766,8 +1301,12 @@ class AMC_Ingestion {
 
 		self::set_uploads_status_for_week( $week_id, 'published' );
 		self::log( 0, 0, $force ? 'republishing' : 'publishing', 'info', $force ? 'Chart week republished.' : 'Chart week published.', array( 'chart_week_id' => (int) $week_id ) );
+		self::notify( 'success', $force ? 'Chart week republished successfully.' : 'Chart week published successfully.', array( 'week_id' => $week_id ) );
+		self::maybe_send_external_alert( 'publish_completed', $force ? 'Chart week republished successfully.' : 'Chart week published successfully.', array( 'week_id' => $week_id, 'forced' => (bool) $force ) );
+		self::release_operation_lock( $lock_name );
 		return array(
 			'success' => true,
+			'step'    => 'publishing',
 			'message' => $force ? 'Chart week republished successfully.' : 'Chart week published successfully.',
 		);
 	}
@@ -800,6 +1339,7 @@ class AMC_Ingestion {
 		}
 
 		$entries = AMC_DB::get_chart_entries( $week_id );
+		$chart   = AMC_DB::get_row( 'charts', (int) $week['chart_id'] );
 
 		if ( empty( $entries ) ) {
 			$issues[] = 'Chart week has no generated entries.';
@@ -809,9 +1349,94 @@ class AMC_Ingestion {
 			$issues[] = 'Archived weeks should be restored to draft before publishing.';
 		}
 
+		if ( ! $chart || empty( $chart['type'] ) || empty( $chart['name'] ) ) {
+			$issues[] = 'Chart metadata is incomplete.';
+		}
+
+		$rules = self::get_scoring_rules();
+		$has_scoring = false;
+		if ( ! empty( $rules['weights'] ) ) {
+			foreach ( $rules['weights'] as $row ) {
+				if ( '' !== trim( (string) $row['value'] ) && (float) $row['value'] > 0 ) {
+					$has_scoring = true;
+					break;
+				}
+			}
+		}
+		if ( ! $has_scoring ) {
+			$issues[] = 'Scoring rules are missing or empty.';
+		}
+
+		$uploads = AMC_DB::get_rows(
+			'source_uploads',
+			array(
+				'where' => array(
+					'generated_week_id' => absint( $week_id ),
+				),
+			)
+		);
+		$rejected = 0;
+		$review   = 0;
+		foreach ( $uploads as $upload ) {
+			$diag = ! empty( $upload['diagnostic_summary'] ) ? json_decode( $upload['diagnostic_summary'], true ) : array();
+			if ( is_array( $diag ) ) {
+				$rejected += ! empty( $diag['rejected_rows'] ) ? (int) $diag['rejected_rows'] : 0;
+				$review   += ! empty( $diag['review_needed'] ) ? (int) $diag['review_needed'] : 0;
+			}
+		}
+
+		if ( $review > 10 ) {
+			$issues[] = 'Too many review-needed rows remain for this week.';
+		}
+
+		if ( $rejected > 25 ) {
+			$issues[] = 'Too many rejected rows were produced for this week.';
+		}
+
+		$live_conflict = AMC_DB::get_rows(
+			'chart_weeks',
+			array(
+				'where' => array(
+					'chart_id' => (int) $week['chart_id'],
+					'country'  => $week['country'],
+					'status'   => 'published',
+				),
+			)
+		);
+
+		foreach ( $live_conflict as $live_week ) {
+			if ( (int) $live_week['id'] !== (int) $week_id ) {
+				$issues[] = 'Another live week already exists for this chart and country.';
+				break;
+			}
+		}
+
 		return array(
 			'success' => empty( $issues ),
 			'issues'  => $issues,
+		);
+	}
+
+	/**
+	 * Run cleanup/diagnostics helper task.
+	 *
+	 * @return array
+	 */
+	public static function run_cleanup_diagnostics() {
+		$summary = array(
+			'failed_jobs'     => AMC_DB::count_rows( 'jobs', array( 'status' => 'failed' ) ),
+			'queued_jobs'     => AMC_DB::count_rows( 'jobs', array( 'status' => 'queued' ) ),
+			'review_queue'    => AMC_DB::count_rows( 'matching_queue', array( 'status' => 'review_needed' ) ),
+			'draft_weeks'     => AMC_DB::count_rows( 'chart_weeks', array( 'status' => 'draft' ) ),
+		);
+
+		self::log( 0, 0, 'diagnostics', 'info', 'Diagnostics snapshot completed.', $summary );
+
+		return array(
+			'success' => true,
+			'step'    => 'diagnostics',
+			'message' => 'Diagnostics snapshot completed.',
+			'summary' => $summary,
 		);
 	}
 
@@ -839,6 +1464,7 @@ class AMC_Ingestion {
 
 		self::set_uploads_status_for_week( $week_id, 'generated' );
 		self::log( 0, 0, 'publishing', 'info', 'Chart week unpublished back to draft.', array( 'chart_week_id' => (int) $week_id ) );
+		self::notify( 'info', 'Chart week moved back to draft.', array( 'week_id' => $week_id ) );
 		return true;
 	}
 
@@ -873,6 +1499,9 @@ class AMC_Ingestion {
 
 		$result = self::publish_chart_week( (int) $previous['id'], true );
 		self::log( 0, 0, 'rollback', 'warning', 'Rollback to previous published week executed.', array( 'from_week_id' => (int) $week_id, 'to_week_id' => (int) $previous['id'] ) );
+		if ( ! empty( $result['success'] ) ) {
+			self::notify( 'warning', 'Rollback completed successfully.', array( 'from_week_id' => $week_id, 'to_week_id' => (int) $previous['id'] ) );
+		}
 
 		return array(
 			'success' => ! empty( $result['success'] ),
@@ -1150,6 +1779,444 @@ class AMC_Ingestion {
 				'message'       => $message,
 				'context'       => wp_json_encode( $context ),
 			)
+		);
+	}
+
+	/**
+	 * Store an operator notification.
+	 *
+	 * @param string $type Type.
+	 * @param string $message Message.
+	 * @param array  $context Context.
+	 * @return void
+	 */
+	private static function notify( $type, $message, $context = array() ) {
+		$notifications = get_option( 'amc_operator_notifications', array() );
+		$notifications[] = array(
+			'id'         => uniqid( 'amc_notice_', true ),
+			'type'       => sanitize_key( $type ),
+			'message'    => sanitize_text_field( $message ),
+			'context'    => $context,
+			'status'     => 'unread',
+			'is_read'    => 0,
+			'is_dismissed' => 0,
+			'created_at' => current_time( 'mysql' ),
+			'read_at'    => '',
+			'dismissed_at' => '',
+		);
+
+		if ( count( $notifications ) > 30 ) {
+			$notifications = array_slice( $notifications, -30 );
+		}
+
+		update_option( 'amc_operator_notifications', $notifications, false );
+	}
+
+	/**
+	 * Return stored operator notifications.
+	 *
+	 * @return array
+	 */
+	public static function notifications() {
+		$notifications = get_option( 'amc_operator_notifications', array() );
+		return is_array( $notifications ) ? $notifications : array();
+	}
+
+	/**
+	 * Mark a notification as read.
+	 *
+	 * @param string $notification_id Notification id.
+	 * @return array
+	 */
+	public static function mark_notification_read( $notification_id ) {
+		return self::update_notification_state( $notification_id, 'read' );
+	}
+
+	/**
+	 * Dismiss a notification.
+	 *
+	 * @param string $notification_id Notification id.
+	 * @return array
+	 */
+	public static function dismiss_notification( $notification_id ) {
+		return self::update_notification_state( $notification_id, 'dismissed' );
+	}
+
+	/**
+	 * Mark matching notifications read in bulk.
+	 *
+	 * @param array $filters Filters.
+	 * @return array
+	 */
+	public static function mark_notifications_read( $filters = array() ) {
+		return self::bulk_update_notifications( $filters, 'read' );
+	}
+
+	/**
+	 * Dismiss matching notifications in bulk.
+	 *
+	 * @param array $filters Filters.
+	 * @return array
+	 */
+	public static function dismiss_notifications( $filters = array() ) {
+		return self::bulk_update_notifications( $filters, 'dismissed' );
+	}
+
+	/**
+	 * Update notification state.
+	 *
+	 * @param string $notification_id Notification id.
+	 * @param string $state Target state.
+	 * @return array
+	 */
+	private static function update_notification_state( $notification_id, $state ) {
+		$notifications = self::notifications();
+		$updated       = false;
+
+		foreach ( $notifications as &$notification ) {
+			if ( empty( $notification['id'] ) || $notification['id'] !== $notification_id ) {
+				continue;
+			}
+
+			if ( 'read' === $state ) {
+				$notification['status']  = 'read';
+				$notification['is_read'] = 1;
+				$notification['read_at'] = current_time( 'mysql' );
+			}
+
+			if ( 'dismissed' === $state ) {
+				$notification['status']        = 'dismissed';
+				$notification['is_dismissed']  = 1;
+				$notification['dismissed_at']  = current_time( 'mysql' );
+			}
+
+			$updated = true;
+		}
+		unset( $notification );
+
+		if ( $updated ) {
+			update_option( 'amc_operator_notifications', $notifications, false );
+			return array( 'success' => true, 'message' => 'Notification updated.' );
+		}
+
+		return array( 'success' => false, 'message' => 'Notification could not be found.' );
+	}
+
+	/**
+	 * Bulk update notifications by filters.
+	 *
+	 * @param array  $filters Filters.
+	 * @param string $state Target state.
+	 * @return array
+	 */
+	private static function bulk_update_notifications( $filters, $state ) {
+		$notifications = self::notifications();
+		$count         = 0;
+
+		foreach ( $notifications as &$notification ) {
+			if ( ! self::notification_matches_filters( $notification, $filters ) ) {
+				continue;
+			}
+
+			if ( 'read' === $state && empty( $notification['is_read'] ) ) {
+				$notification['status']  = 'read';
+				$notification['is_read'] = 1;
+				$notification['read_at'] = current_time( 'mysql' );
+				++$count;
+			}
+
+			if ( 'dismissed' === $state && empty( $notification['is_dismissed'] ) ) {
+				$notification['status']       = 'dismissed';
+				$notification['is_dismissed'] = 1;
+				$notification['dismissed_at'] = current_time( 'mysql' );
+				++$count;
+			}
+		}
+		unset( $notification );
+
+		update_option( 'amc_operator_notifications', $notifications, false );
+
+		return array(
+			'success' => true,
+			'message' => $count ? sprintf( '%d notifications updated.', $count ) : 'No notifications matched the selected filters.',
+		);
+	}
+
+	/**
+	 * Check whether a notification matches filter values.
+	 *
+	 * @param array $notification Notification.
+	 * @param array $filters Filters.
+	 * @return bool
+	 */
+	private static function notification_matches_filters( $notification, $filters ) {
+		if ( ! empty( $filters['ids'] ) ) {
+			return in_array( $notification['id'], $filters['ids'], true );
+		}
+
+		if ( ! empty( $filters['severity'] ) && ( empty( $notification['type'] ) || $notification['type'] !== $filters['severity'] ) ) {
+			return false;
+		}
+
+		if ( ! empty( $filters['status'] ) ) {
+			if ( 'unread' === $filters['status'] && ! empty( $notification['is_read'] ) ) {
+				return false;
+			}
+
+			if ( 'read' === $filters['status'] && empty( $notification['is_read'] ) ) {
+				return false;
+			}
+
+			if ( 'dismissed' === $filters['status'] && empty( $notification['is_dismissed'] ) ) {
+				return false;
+			}
+		}
+
+		if ( ! empty( $filters['date'] ) && ( empty( $notification['created_at'] ) || 0 !== strpos( $notification['created_at'], $filters['date'] ) ) ) {
+			return false;
+		}
+
+		return true;
+	}
+
+	/**
+	 * Build a lock key for a queued job.
+	 *
+	 * @param string $job_type Job type.
+	 * @param array  $args Job payload.
+	 * @return string
+	 */
+	private static function build_job_lock_key( $job_type, $args ) {
+		$parts = array(
+			sanitize_key( $job_type ),
+			! empty( $args['reference_type'] ) ? sanitize_key( $args['reference_type'] ) : '',
+			! empty( $args['reference_id'] ) ? absint( $args['reference_id'] ) : 0,
+			! empty( $args['chart_id'] ) ? absint( $args['chart_id'] ) : 0,
+			! empty( $args['country'] ) ? self::normalize_country( $args['country'] ) : '',
+			! empty( $args['week_date'] ) ? sanitize_text_field( $args['week_date'] ) : ( ! empty( $args['chart_date'] ) ? sanitize_text_field( $args['chart_date'] ) : '' ),
+		);
+
+		return implode( ':', $parts );
+	}
+
+	/**
+	 * Whether a job type can be rerun safely from the UI.
+	 *
+	 * @param string $job_type Job type.
+	 * @return bool
+	 */
+	private static function job_type_rerunnable( $job_type ) {
+		return in_array( $job_type, array( 'parse_upload', 'rerun_matching', 'auto_create_processing', 'generate_chart', 'publish_checks', 'cleanup_diagnostics' ), true );
+	}
+
+	/**
+	 * Whether a job type can be retried automatically.
+	 *
+	 * @param string $job_type Job type.
+	 * @return bool
+	 */
+	private static function job_type_retryable( $job_type ) {
+		return in_array( $job_type, array( 'parse_upload', 'rerun_matching', 'auto_create_processing', 'generate_chart', 'publish_checks' ), true );
+	}
+
+	/**
+	 * Retry policy per job type.
+	 *
+	 * @param string $job_type Job type.
+	 * @return array
+	 */
+	private static function retry_policy_for_job_type( $job_type ) {
+		$default = array(
+			'max_attempts'       => 3,
+			'retry_delay_seconds'=> 300,
+		);
+
+		$map = array(
+			'parse_upload'           => array( 'max_attempts' => 2, 'retry_delay_seconds' => 180 ),
+			'rerun_matching'         => array( 'max_attempts' => 2, 'retry_delay_seconds' => 180 ),
+			'auto_create_processing' => array( 'max_attempts' => 2, 'retry_delay_seconds' => 240 ),
+			'generate_chart'         => array( 'max_attempts' => 3, 'retry_delay_seconds' => 300 ),
+			'publish_checks'         => array( 'max_attempts' => 2, 'retry_delay_seconds' => 300 ),
+			'cleanup_diagnostics'    => array( 'max_attempts' => 1, 'retry_delay_seconds' => 600 ),
+		);
+
+		return ! empty( $map[ $job_type ] ) ? $map[ $job_type ] : $default;
+	}
+
+	/**
+	 * Build payload for rerunning a completed job.
+	 *
+	 * @param array $job Job row.
+	 * @return array
+	 */
+	private static function job_payload_for_rerun( $job ) {
+		$payload = ! empty( $job['payload'] ) ? json_decode( $job['payload'], true ) : array();
+		$payload = is_array( $payload ) ? $payload : array();
+		$payload['trigger_mode'] = 'manual';
+		return $payload;
+	}
+
+	/**
+	 * Acquire a generic transient lock.
+	 *
+	 * @param string $name Lock name.
+	 * @param int    $ttl TTL in seconds.
+	 * @return bool
+	 */
+	private static function acquire_lock( $name, $ttl ) {
+		$key = 'amc_lock_' . md5( $name );
+
+		if ( get_transient( $key ) ) {
+			return false;
+		}
+
+		return set_transient( $key, 1, $ttl );
+	}
+
+	/**
+	 * Release a generic transient lock.
+	 *
+	 * @param string $name Lock name.
+	 * @return void
+	 */
+	private static function release_lock( $name ) {
+		delete_transient( 'amc_lock_' . md5( $name ) );
+	}
+
+	/**
+	 * Acquire an operation lock with operator notification.
+	 *
+	 * @param string $name Lock name.
+	 * @param string $message Busy message.
+	 * @return bool
+	 */
+	private static function acquire_operation_lock( $name, $message ) {
+		$acquired = self::acquire_lock( $name, 10 * MINUTE_IN_SECONDS );
+
+		if ( ! $acquired ) {
+			self::notify( 'warning', $message, array( 'lock' => $name ) );
+		}
+
+		return $acquired;
+	}
+
+	/**
+	 * Release an operation lock.
+	 *
+	 * @param string $name Lock name.
+	 * @return void
+	 */
+	private static function release_operation_lock( $name ) {
+		self::release_lock( $name );
+	}
+
+	/**
+	 * Send external alert notifications when configured.
+	 *
+	 * @param string $alert_type Alert type.
+	 * @param string $message Message.
+	 * @param array  $context Context.
+	 * @return void
+	 */
+	private static function maybe_send_external_alert( $alert_type, $message, $context = array() ) {
+		$settings     = AMC_DB::get_settings();
+		$enabled_raw  = ! empty( $settings['alert_types_enabled'] ) ? $settings['alert_types_enabled'] : '';
+		$enabled      = array_filter( array_map( 'trim', explode( ',', (string) $enabled_raw ) ) );
+
+		if ( ! empty( $enabled ) && ! in_array( $alert_type, $enabled, true ) ) {
+			return;
+		}
+
+		if ( ! empty( $settings['alert_email'] ) && is_email( $settings['alert_email'] ) ) {
+			wp_mail(
+				$settings['alert_email'],
+				'Kontentainment Charts alert: ' . $alert_type,
+				$message . "\n\n" . wp_json_encode( $context )
+			);
+		}
+
+		if ( ! empty( $settings['alert_webhook_url'] ) ) {
+			wp_remote_post(
+				esc_url_raw( $settings['alert_webhook_url'] ),
+				array(
+					'timeout' => 10,
+					'headers' => array( 'Content-Type' => 'application/json' ),
+					'body'    => wp_json_encode(
+						array(
+							'brand'      => 'Kontentainment Charts',
+							'alert_type' => $alert_type,
+							'message'    => $message,
+							'context'    => $context,
+							'timestamp'  => current_time( 'mysql' ),
+						)
+					),
+				)
+			);
+		}
+	}
+
+	/**
+	 * Send threshold-driven alerts for an upload.
+	 *
+	 * @param int $upload_id Upload id.
+	 * @return void
+	 */
+	private static function maybe_send_threshold_alerts_for_upload( $upload_id ) {
+		$upload = AMC_DB::get_row( 'source_uploads', $upload_id );
+
+		if ( ! $upload || empty( $upload['diagnostic_summary'] ) ) {
+			return;
+		}
+
+		$diag     = json_decode( $upload['diagnostic_summary'], true );
+		$review   = is_array( $diag ) && ! empty( $diag['review_needed'] ) ? (int) $diag['review_needed'] : 0;
+		$rejected = is_array( $diag ) && ! empty( $diag['rejected_rows'] ) ? (int) $diag['rejected_rows'] : 0;
+
+		if ( $review >= 10 ) {
+			self::maybe_send_external_alert( 'too_many_review_needed_rows', 'An upload generated too many review-needed rows.', array( 'upload_id' => $upload_id, 'review_needed' => $review ) );
+		}
+
+		if ( $rejected >= 15 ) {
+			self::maybe_send_external_alert( 'too_many_rejected_rows', 'An upload generated too many rejected rows.', array( 'upload_id' => $upload_id, 'rejected_rows' => $rejected ) );
+		}
+
+		$backlog = AMC_DB::jobs_summary();
+		if ( ! empty( $backlog['queued'] ) && (int) $backlog['queued'] >= 10 ) {
+			self::maybe_send_external_alert( 'queue_backlog_warning', 'Queued job backlog exceeded the warning threshold.', array( 'queued_jobs' => (int) $backlog['queued'] ) );
+		}
+	}
+
+	/**
+	 * Bulk job action handler.
+	 *
+	 * @param string $task Task.
+	 * @param array  $job_ids Job ids.
+	 * @return array
+	 */
+	public static function bulk_job_action( $task, $job_ids ) {
+		$job_ids = array_values( array_unique( array_filter( array_map( 'absint', (array) $job_ids ) ) ) );
+		$count   = 0;
+		$errors  = array();
+
+		foreach ( $job_ids as $job_id ) {
+			if ( 'retry' === $task ) {
+				$result = self::retry_job( $job_id );
+			} elseif ( 'cancel' === $task ) {
+				$result = self::cancel_job( $job_id );
+			} else {
+				$result = array( 'success' => false, 'message' => 'Unsupported bulk job action.' );
+			}
+
+			if ( ! empty( $result['success'] ) ) {
+				++$count;
+			} else {
+				$errors[] = $result['message'];
+			}
+		}
+
+		return array(
+			'success' => $count > 0,
+			'message' => $count ? sprintf( '%d jobs updated.', $count ) : ( ! empty( $errors ) ? implode( ' ', array_slice( $errors, 0, 3 ) ) : 'No jobs were updated.' ),
 		);
 	}
 
@@ -1797,6 +2864,7 @@ class AMC_Ingestion {
 			'invalid_rows'      => 0,
 			'matched_rows'      => 0,
 			'review_needed'     => 0,
+			'auto_created_rows' => 0,
 			'rejected_rows'     => 0,
 			'pending_rows'      => 0,
 		);
@@ -1810,6 +2878,9 @@ class AMC_Ingestion {
 
 			if ( 'matched' === $row['matching_status'] ) {
 				++$summary['matched_rows'];
+				if ( 'auto_created' === $row['match_resolution'] ) {
+					++$summary['auto_created_rows'];
+				}
 			} elseif ( 'review_needed' === $row['matching_status'] ) {
 				++$summary['review_needed'];
 			} elseif ( 'rejected' === $row['matching_status'] || 'invalid' === $row['matching_status'] ) {
@@ -2091,6 +3162,309 @@ class AMC_Ingestion {
 		}
 
 		return null;
+	}
+
+	/**
+	 * Find album candidate.
+	 *
+	 * @param array $row Source row.
+	 * @param int   $artist_id Artist id.
+	 * @return array|null
+	 */
+	private static function find_album_candidate( $row, $artist_id = 0 ) {
+		if ( empty( $row['normalized_album'] ) ) {
+			return null;
+		}
+
+		$albums      = AMC_DB::get_rows( 'albums', array( 'order_by' => 'id ASC' ) );
+		$best        = null;
+		$best_score  = 0;
+		$best_basis  = 'No album candidate';
+		$best_level  = 'review needed';
+
+		foreach ( $albums as $album ) {
+			if ( $artist_id > 0 && ! empty( $album['artist_id'] ) && (int) $album['artist_id'] !== (int) $artist_id ) {
+				continue;
+			}
+
+			$result = self::best_alias_match_score( $row['normalized_album'], array( self::normalize_text( $album['title'] ) ) );
+
+			if ( 100 === $result['score'] ) {
+				return array(
+					'candidate'  => $album,
+					'confidence' => 99,
+					'level'      => 'exact',
+					'basis'      => 'Exact normalized album match',
+				);
+			}
+
+			if ( $result['score'] > $best_score ) {
+				$best_score = $result['score'];
+				$best       = $album;
+				$best_basis = 'Album normalized similarity';
+				$best_level = $best_score >= 92 ? 'high confidence' : ( $best_score >= 78 ? 'review needed' : 'no match' );
+			}
+		}
+
+		if ( $best && $best_score >= 78 ) {
+			return array(
+				'candidate'  => $best,
+				'confidence' => round( $best_score, 2 ),
+				'level'      => $best_level,
+				'basis'      => $best_basis,
+			);
+		}
+
+		return null;
+	}
+
+	/**
+	 * Auto-create a safe entity from a normalized row.
+	 *
+	 * @param array  $row Source row.
+	 * @param string $type Target entity type.
+	 * @return array
+	 */
+	private static function auto_create_entity_from_row( $row, $type ) {
+		if ( 'artist' === $type ) {
+			if ( empty( $row['normalized_artist'] ) ) {
+				return array( 'success' => false, 'reason' => 'Artist name is empty after normalization.' );
+			}
+
+			$artist_id = self::create_artist_from_row( $row );
+
+			return $artist_id ? array(
+				'success'     => true,
+				'entity_id'   => $artist_id,
+				'entity_type' => 'artist',
+				'label'       => $row['artist_name'],
+				'basis'       => 'Created a new artist because the row was valid, unmatched, and unambiguous.',
+			) : array(
+				'success' => false,
+				'reason'  => 'Artist could not be auto-created safely.',
+			);
+		}
+
+		if ( empty( $row['normalized_title'] ) || empty( $row['normalized_artist'] ) ) {
+			return array( 'success' => false, 'reason' => 'Track title or artist metadata is missing after normalization.' );
+		}
+
+		$artist_review = self::find_artist_candidate(
+			array(
+				'normalized_artist' => $row['normalized_artist'],
+			)
+		);
+
+		if ( $artist_review && 'review needed' === $artist_review['level'] ) {
+			return array( 'success' => false, 'reason' => 'Artist candidate is ambiguous and needs manual review.' );
+		}
+
+		$artist_id = $artist_review && ! empty( $artist_review['candidate']['id'] ) ? (int) $artist_review['candidate']['id'] : self::create_artist_from_row( $row );
+
+		if ( ! $artist_id ) {
+			return array( 'success' => false, 'reason' => 'Artist record could not be resolved or created safely.' );
+		}
+
+		$album_id = 0;
+		if ( ! empty( $row['normalized_album'] ) ) {
+			$album_review = self::find_album_candidate( $row, $artist_id );
+
+			if ( $album_review && 'review needed' === $album_review['level'] ) {
+				return array( 'success' => false, 'reason' => 'Album metadata is ambiguous and needs review before creating the track.' );
+			}
+
+			$album_id = $album_review && ! empty( $album_review['candidate']['id'] ) ? (int) $album_review['candidate']['id'] : self::create_album_from_row( $row, $artist_id );
+		}
+
+		$track_id = self::create_track_from_row( $row, $artist_id, $album_id );
+
+		return $track_id ? array(
+			'success'     => true,
+			'entity_id'   => $track_id,
+			'entity_type' => 'track',
+			'label'       => $row['track_title'],
+			'basis'       => 'Created a new track because the row was valid, unmatched, and unambiguous.',
+			'artist_id'   => $artist_id,
+			'album_id'    => $album_id,
+		) : array(
+			'success' => false,
+			'reason'  => 'Track record could not be auto-created safely.',
+		);
+	}
+
+	/**
+	 * Create artist from row.
+	 *
+	 * @param array $row Source row.
+	 * @return int
+	 */
+	private static function create_artist_from_row( $row ) {
+		$name = ! empty( $row['artist_name'] ) ? $row['artist_name'] : $row['artist_names'];
+
+		if ( ! $name ) {
+			return 0;
+		}
+
+		$slug = self::unique_slug( 'artists', sanitize_title( $name ) );
+
+		return AMC_DB::save_row(
+			'artists',
+			array(
+				'name'              => $name,
+				'slug'              => $slug,
+				'image'             => '',
+				'aliases'           => '',
+				'bio'               => '',
+				'blurb'             => '',
+				'country'           => ! empty( $row['country'] ) ? $row['country'] : '',
+				'genre'             => '',
+				'social_links'      => '',
+				'monthly_listeners' => '',
+				'chart_streak'      => '',
+				'gradient'          => 'ocean',
+				'status'            => 'active',
+			)
+		);
+	}
+
+	/**
+	 * Create album from row.
+	 *
+	 * @param array $row Source row.
+	 * @param int   $artist_id Artist id.
+	 * @return int
+	 */
+	private static function create_album_from_row( $row, $artist_id ) {
+		if ( empty( $row['album_name'] ) ) {
+			return 0;
+		}
+
+		$slug = self::unique_slug( 'albums', sanitize_title( $row['album_name'] ) );
+
+		return AMC_DB::save_row(
+			'albums',
+			array(
+				'artist_id'    => absint( $artist_id ),
+				'title'        => $row['album_name'],
+				'slug'         => $slug,
+				'cover_image'  => '',
+				'description'  => '',
+				'release_date' => null,
+				'release_year' => '',
+				'track_list'   => '',
+				'genre'        => '',
+				'label'        => '',
+				'gradient'     => 'ocean',
+				'status'       => 'active',
+			)
+		);
+	}
+
+	/**
+	 * Create track from row.
+	 *
+	 * @param array $row Source row.
+	 * @param int   $artist_id Artist id.
+	 * @param int   $album_id Album id.
+	 * @return int
+	 */
+	private static function create_track_from_row( $row, $artist_id, $album_id ) {
+		if ( empty( $row['track_title'] ) ) {
+			return 0;
+		}
+
+		$slug = self::unique_slug( 'tracks', sanitize_title( $row['track_title'] ) );
+
+		return AMC_DB::save_row(
+			'tracks',
+			array(
+				'artist_id'    => absint( $artist_id ),
+				'album_id'     => absint( $album_id ),
+				'title'        => $row['track_title'],
+				'slug'         => $slug,
+				'cover_image'  => '',
+				'description'  => '',
+				'isrc'         => ! empty( $row['normalized_isrc'] ) ? $row['normalized_isrc'] : '',
+				'aliases'      => '',
+				'release_date' => null,
+				'genre'        => '',
+				'duration'     => '',
+				'gradient'     => 'ocean',
+				'status'       => 'active',
+			)
+		);
+	}
+
+	/**
+	 * Build unique slug for entity table.
+	 *
+	 * @param string $table_key Table key.
+	 * @param string $base_slug Base slug.
+	 * @return string
+	 */
+	private static function unique_slug( $table_key, $base_slug ) {
+		$base_slug = $base_slug ? $base_slug : 'item';
+		$slug      = $base_slug;
+		$index     = 2;
+
+		while ( AMC_DB::get_row_by_slug( $table_key, $slug ) ) {
+			$slug = $base_slug . '-' . $index;
+			++$index;
+		}
+
+		return $slug;
+	}
+
+	/**
+	 * Resolve queue row type.
+	 *
+	 * @param string $status Queue status.
+	 * @param int    $entity_id Entity id.
+	 * @param string $label Candidate label.
+	 * @param string $basis Basis.
+	 * @return string
+	 */
+	private static function queue_row_type( $status, $entity_id, $label, $basis ) {
+		if ( 'auto_created' === $status ) {
+			return 'ready to create';
+		}
+
+		if ( 'approved' === $status ) {
+			return 'matched automatically';
+		}
+
+		if ( 'review_needed' === $status && $entity_id > 0 ) {
+			return 'possible duplicate';
+		}
+
+		if ( 'review_needed' === $status && 0 === $entity_id ) {
+			return 'unmatched';
+		}
+
+		return 'review needed';
+	}
+
+	/**
+	 * Resolve queue action hint.
+	 *
+	 * @param string $status Queue status.
+	 * @param int    $entity_id Entity id.
+	 * @return string
+	 */
+	private static function queue_action_hint( $status, $entity_id ) {
+		if ( 'auto_created' === $status ) {
+			return 'System created a new entity automatically because the row was valid and unambiguous.';
+		}
+
+		if ( 'approved' === $status ) {
+			return 'System matched this row automatically to an existing entity.';
+		}
+
+		if ( 'review_needed' === $status && $entity_id > 0 ) {
+			return 'Review before confirming this possible duplicate or near-match.';
+		}
+
+		return 'Review or override before generation. No safe automatic target was available.';
 	}
 
 	/**

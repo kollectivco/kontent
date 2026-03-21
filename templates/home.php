@@ -35,6 +35,7 @@ include AMC_PLUGIN_DIR . 'templates/parts/site-header.php';
 				<?php endif; ?>
 				<div class="amc-home-hero__actions">
 					<a class="amc-button" href="<?php echo esc_url( AMC_Data::route_url( 'charts' ) ); ?>"><?php echo esc_html( $public_state['has_published_data'] ? 'Open Charts' : 'View Chart Routes' ); ?></a>
+					<a class="amc-button amc-button--ghost" href="<?php echo esc_url( AMC_Data::route_url( 'about' ) ); ?>">About Charts</a>
 					<?php if ( $hero_chart && $public_state['has_published_data'] ) : ?>
 						<a class="amc-button amc-button--ghost" href="<?php echo esc_url( $hero_chart['url'] ); ?>">Open Lead Chart</a>
 					<?php else : ?>
@@ -134,6 +135,32 @@ include AMC_PLUGIN_DIR . 'templates/parts/site-header.php';
 		include AMC_PLUGIN_DIR . 'templates/parts/more-lists.php';
 		?>
 	</div>
+
+	<section class="amc-section">
+		<div class="amc-container amc-split">
+			<div class="amc-panel">
+				<div class="amc-panel__header">
+					<p class="amc-section-label">Discovery</p>
+					<h2>Browse the music library</h2>
+				</div>
+				<p>Explore real artists and tracks that have been added to Kontentainment Charts, even before every chart route is fully populated with live weeks.</p>
+				<div class="amc-home-hero__actions">
+					<a class="amc-button" href="<?php echo esc_url( AMC_Data::route_url( 'artists' ) ); ?>">All Artists</a>
+					<a class="amc-button amc-button--ghost" href="<?php echo esc_url( AMC_Data::route_url( 'tracks' ) ); ?>">All Tracks</a>
+				</div>
+			</div>
+			<div class="amc-panel">
+				<div class="amc-panel__header">
+					<p class="amc-section-label">Methodology</p>
+					<h2>How the charts are built</h2>
+				</div>
+				<p>Read the platform methodology, understand the publishing flow, and see how source data becomes a live chart week.</p>
+				<div class="amc-home-hero__actions">
+					<a class="amc-button amc-button--ghost" href="<?php echo esc_url( AMC_Data::route_url( 'about' ) ); ?>">About The Charts</a>
+				</div>
+			</div>
+		</div>
+	</section>
 </main>
 <?php
 include AMC_PLUGIN_DIR . 'templates/parts/site-footer.php';

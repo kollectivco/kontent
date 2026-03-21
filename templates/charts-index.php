@@ -37,6 +37,30 @@ include AMC_PLUGIN_DIR . 'templates/parts/site-header.php';
 			</div>
 		</div>
 	</section>
+
+	<section class="amc-section">
+		<div class="amc-container amc-split">
+			<div class="amc-panel">
+				<div class="amc-panel__header">
+					<p class="amc-section-label">About The Charts</p>
+					<h2>Methodology and publishing flow</h2>
+				</div>
+				<p>Kontentainment Charts publishes chart weeks from real uploaded sources through parsing, validation, matching, generation, and final publishing review.</p>
+				<a class="amc-text-link" href="<?php echo esc_url( AMC_Data::route_url( 'about' ) ); ?>">Read about the methodology</a>
+			</div>
+			<div class="amc-panel">
+				<div class="amc-panel__header">
+					<p class="amc-section-label">Discovery</p>
+					<h2>Browse artists and tracks</h2>
+				</div>
+				<p>Use the library indexes to explore artists and tracks that are already present in the platform.</p>
+				<div class="amc-home-hero__actions">
+					<a class="amc-button" href="<?php echo esc_url( AMC_Data::route_url( 'artists' ) ); ?>">All Artists</a>
+					<a class="amc-button amc-button--ghost" href="<?php echo esc_url( AMC_Data::route_url( 'tracks' ) ); ?>">All Tracks</a>
+				</div>
+			</div>
+		</div>
+	</section>
 </main>
 <?php
 include AMC_PLUGIN_DIR . 'templates/parts/site-footer.php';
